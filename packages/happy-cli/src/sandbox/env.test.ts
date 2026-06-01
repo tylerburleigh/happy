@@ -1,8 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { homedir } from 'node:os';
 import { SandboxConfigSchema } from '@/persistence';
 import { buildSandboxedProcessEnv } from './env';
 import { writePrivateFileSync } from '@/utils/privateFiles';
+
+const { mockLogger } = vi.hoisted(() => ({
+    mockLogger: {
+        debug: vi.fn(),
+        warn: vi.fn(),
+    },
+}));
 
 vi.mock('@/configuration', () => ({
     configuration: {
@@ -21,7 +28,15 @@ vi.mock('node:fs', () => ({
     chmodSync: vi.fn(),
 }));
 
+vi.mock('@/ui/logger', () => ({
+    logger: mockLogger,
+}));
+
 describe('buildSandboxedProcessEnv', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
     it('keeps safe shell env and drops globally exported secrets', () => {
         const config = SandboxConfigSchema.parse({
             enabled: true,
@@ -49,6 +64,9 @@ describe('buildSandboxedProcessEnv', () => {
         expect(env.HAPPY_SERVER_URL).toBe('https://happy.example');
         expect(env.OPENAI_API_KEY).toBeUndefined();
         expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+        expect(mockLogger.debug).toHaveBeenCalledWith(
+            '[sandbox/env] Dropped secret-like environment variables: CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY',
+        );
         expect(env.CODEX_HOME).toBe(`${homedir()}/.happy/agent-homes/codex`);
         expect(env.CLAUDE_CONFIG_DIR).toBe(`${homedir()}/.happy/agent-homes/claude`);
         expect(writePrivateFileSync).toHaveBeenCalledWith(
@@ -75,5 +93,18 @@ describe('buildSandboxedProcessEnv', () => {
         );
 
         expect(env.OPENAI_API_KEY).toBe('explicit-secret');
+    });
+
+    it('warns when shared agent homes are enabled', () => {
+        const config = SandboxConfigSchema.parse({
+            enabled: true,
+            agentHomeMode: 'shared',
+        });
+
+        buildSandboxedProcessEnv({ PATH: '/usr/bin' }, config, '/repo');
+
+        expect(mockLogger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('agentHomeMode=shared exposes existing Claude/Codex config and state'),
+        );
     });
 });

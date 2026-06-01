@@ -3,6 +3,8 @@ import { chmodSync } from 'node:fs';
 import type { SandboxConfig } from '@/persistence';
 import { configuration } from '@/configuration';
 import { ensurePrivateDirSync, writePrivateFileSync } from '@/utils/privateFiles';
+import { logger } from '@/ui/logger';
+import { isSecretLikeKey } from '@/utils/redactSecrets';
 import { getSandboxAgentHomePaths } from './config';
 
 const SAFE_BASE_ENV = new Set([
@@ -70,10 +72,20 @@ export function buildSandboxedProcessEnv(
     explicitEnv: Record<string, string | undefined> = {},
 ): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
+    const droppedSecretLikeKeys = new Set<string>();
+
     for (const [key, value] of Object.entries(baseEnv)) {
         if (typeof value === 'string' && shouldPassEnv(key, sandboxConfig)) {
             env[key] = value;
+        } else if (typeof value === 'string' && isSecretLikeKey(key)) {
+            droppedSecretLikeKeys.add(key);
         }
+    }
+
+    if (droppedSecretLikeKeys.size > 0) {
+        logger.debug(
+            `[sandbox/env] Dropped secret-like environment variables: ${Array.from(droppedSecretLikeKeys).sort().join(', ')}`,
+        );
     }
 
     for (const [key, value] of Object.entries(explicitEnv)) {
@@ -85,6 +97,12 @@ export function buildSandboxedProcessEnv(
     const { codexHome, claudeConfigDir } = getSandboxAgentHomePaths(sandboxConfig, sessionPath);
     ensurePrivateDirSync(codexHome);
     ensurePrivateDirSync(claudeConfigDir);
+
+    if (sandboxConfig.agentHomeMode === 'shared') {
+        logger.warn(
+            '[sandbox/env] agentHomeMode=shared exposes existing Claude/Codex config and state to sandboxed agents. Prefer isolated unless intentionally debugging.',
+        );
+    }
 
     env.CODEX_HOME = codexHome;
     env.CLAUDE_CONFIG_DIR = claudeConfigDir;

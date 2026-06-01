@@ -21,6 +21,7 @@ import {
 } from '@/claude/utils/sessionProtocolMapper';
 import { InvalidateSync } from '@/utils/sync';
 import axios from 'axios';
+import { redactSensitiveData } from '@/utils/redactSecrets';
 
 /**
  * ACP (Agent Communication Protocol) message data types.
@@ -121,7 +122,7 @@ export class ApiSessionClient extends EventEmitter {
         super()
         this.token = token;
         this.sessionId = session.id;
-        this.metadata = session.metadata;
+        this.metadata = redactSensitiveData(session.metadata);
         this.metadataVersion = session.metadataVersion;
         this.agentState = session.agentState;
         this.agentStateVersion = session.agentStateVersion;
@@ -214,7 +215,7 @@ export class ApiSessionClient extends EventEmitter {
                     this.lastSeq = messageSeq;
                 } else if (data.body.t === 'update-session') {
                     if (data.body.metadata && data.body.metadata.version > this.metadataVersion) {
-                        this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value));
+                        this.metadata = redactSensitiveData(decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(data.body.metadata.value)));
                         this.metadataVersion = data.body.metadata.version;
                         // Check if session was archived from web/mobile
                         const meta = this.metadata as any;
@@ -691,15 +692,15 @@ export class ApiSessionClient extends EventEmitter {
     updateMetadata(handler: (metadata: Metadata) => Metadata) {
         this.metadataLock.inLock(async () => {
             await backoff(async () => {
-                let updated = handler(this.metadata!); // Weird state if metadata is null - should never happen but here we are
+                let updated = redactSensitiveData(handler(this.metadata!)); // Weird state if metadata is null - should never happen but here we are
                 const answer = await this.socket.emitWithAck('update-metadata', { sid: this.sessionId, expectedVersion: this.metadataVersion, metadata: encodeBase64(encrypt(this.encryptionKey, this.encryptionVariant, updated)) });
                 if (answer.result === 'success') {
-                    this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(answer.metadata));
+                    this.metadata = redactSensitiveData(decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(answer.metadata)));
                     this.metadataVersion = answer.version;
                 } else if (answer.result === 'version-mismatch') {
                     if (answer.version > this.metadataVersion) {
                         this.metadataVersion = answer.version;
-                        this.metadata = decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(answer.metadata));
+                        this.metadata = redactSensitiveData(decrypt(this.encryptionKey, this.encryptionVariant, decodeBase64(answer.metadata)));
                     }
                     throw new Error('Metadata version mismatch');
                 } else if (answer.result === 'error') {
