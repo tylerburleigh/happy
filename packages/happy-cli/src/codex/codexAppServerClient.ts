@@ -36,6 +36,8 @@ import type {
 } from './codexAppServerTypes';
 import type { SandboxConfig } from '@/persistence';
 import { initializeSandbox, wrapForMcpTransport } from '@/sandbox/manager';
+import { buildSandboxedProcessEnv } from '@/sandbox/env';
+import { isSandboxRuntimePlatformSupported, supportedSandboxPlatformSummary } from '@/sandbox/platform';
 import packageJson from '../../package.json';
 
 type PendingRequest = {
@@ -394,7 +396,14 @@ export class CodexAppServerClient {
         let args = ['app-server', '--listen', 'stdio://'];
         this.sandboxEnabled = false;
 
-        if (this.sandboxConfig?.enabled && process.platform !== 'win32') {
+        if (this.sandboxConfig?.enabled && !isSandboxRuntimePlatformSupported()) {
+            const message = `[CodexAppServer] Sandbox is only supported on ${supportedSandboxPlatformSummary()} by the sandbox runtime.`;
+            if (this.sandboxConfig.allowSandboxFallback) {
+                logger.warn(`${message} Continuing without sandbox because allowSandboxFallback is enabled.`);
+            } else {
+                throw new Error(`${message} Re-run with --no-sandbox or set allowSandboxFallback=true if you intentionally want an unsandboxed session.`);
+            }
+        } else if (this.sandboxConfig?.enabled) {
             try {
                 this.sandboxCleanup = await initializeSandbox(this.sandboxConfig, process.cwd());
                 const wrapped = await wrapForMcpTransport('codex', ['app-server', '--listen', 'stdio://']);
@@ -403,15 +412,30 @@ export class CodexAppServerClient {
                 this.sandboxEnabled = true;
                 logger.info(`[CodexAppServer] Sandbox enabled`);
             } catch (error) {
-                logger.warn('[CodexAppServer] Failed to initialize sandbox; continuing without.', error);
-                this.sandboxCleanup = null;
+                if (this.sandboxConfig.allowSandboxFallback) {
+                    logger.warn('[CodexAppServer] Failed to initialize sandbox; continuing without because allowSandboxFallback is enabled.', error);
+                    if (this.sandboxCleanup) {
+                        try { await this.sandboxCleanup(); } catch { }
+                    }
+                    this.sandboxCleanup = null;
+                } else {
+                    if (this.sandboxCleanup) {
+                        try { await this.sandboxCleanup(); } catch { }
+                        this.sandboxCleanup = null;
+                    }
+                    throw error;
+                }
             }
         }
 
         // Build env — same filtering as the old MCP client
-        const env: Record<string, string> = {};
+        let env: Record<string, string> = {};
         for (const [key, value] of Object.entries(process.env)) {
             if (typeof value === 'string') env[key] = value;
+        }
+        if (this.sandboxEnabled) {
+            env = buildSandboxedProcessEnv(process.env, this.sandboxConfig!, process.cwd()) as Record<string, string>;
+            env.CODEX_SANDBOX = 'seatbelt';
         }
         // Mute noisy rollout list logging
         const filter = 'codex_core::rollout::list=off';
@@ -419,9 +443,6 @@ export class CodexAppServerClient {
             env.RUST_LOG = filter;
         } else if (!env.RUST_LOG.includes('codex_core::rollout::list=')) {
             env.RUST_LOG += `,${filter}`;
-        }
-        if (this.sandboxEnabled) {
-            env.CODEX_SANDBOX = 'seatbelt';
         }
 
         logger.debug(`[CodexAppServer] Spawning: ${command} ${args.join(' ')}`);

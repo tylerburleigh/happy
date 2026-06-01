@@ -16,6 +16,11 @@ describe('SandboxConfigSchema', () => {
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: true,
+            allowSandboxFallback: false,
+            agentHomeMode: 'isolated',
+            isolatedCodexHome: '~/.happy/agent-homes/codex',
+            isolatedClaudeConfigDir: '~/.happy/agent-homes/claude',
+            envPassthrough: [],
         });
     });
 
@@ -32,6 +37,9 @@ describe('SandboxConfigSchema', () => {
             allowedDomains: ['api.openai.com', '*.github.com'],
             deniedDomains: ['tracking.example.com'],
             allowLocalBinding: false,
+            allowSandboxFallback: true,
+            agentHomeMode: 'shared',
+            envPassthrough: ['OPENAI_API_KEY'],
         });
 
         expect(parsed.enabled).toBe(true);
@@ -40,6 +48,9 @@ describe('SandboxConfigSchema', () => {
         expect(parsed.networkMode).toBe('custom');
         expect(parsed.allowedDomains).toEqual(['api.openai.com', '*.github.com']);
         expect(parsed.allowLocalBinding).toBe(false);
+        expect(parsed.allowSandboxFallback).toBe(true);
+        expect(parsed.agentHomeMode).toBe('shared');
+        expect(parsed.envPassthrough).toEqual(['OPENAI_API_KEY']);
     });
 
     it('rejects invalid enum values', () => {

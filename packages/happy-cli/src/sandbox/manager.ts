@@ -22,9 +22,17 @@ export async function wrapForMcpTransport(
     command: string,
     args: string[],
 ): Promise<{ command: 'sh'; args: ['-c', string] }> {
-    const wrappedCommand = await wrapCommand(`${command} ${args.join(' ')}`.trim());
+    const commandLine = [command, ...args].map(quoteShellArg).join(' ');
+    const wrappedCommand = await wrapCommand(commandLine);
     return {
         command: 'sh',
         args: ['-c', wrappedCommand],
     };
+}
+
+function quoteShellArg(value: string): string {
+    if (/^[A-Za-z0-9_/:=-]+$/.test(value)) {
+        return value;
+    }
+    return `'${value.replace(/'/g, `'\\''`)}'`;
 }

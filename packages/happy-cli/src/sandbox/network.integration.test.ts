@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { SandboxConfig } from '@/persistence';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 import { initializeSandbox, wrapCommand } from './manager';
 
 const RUN_NETWORK_INTEGRATION = process.env.HAPPY_RUN_SANDBOX_NETWORK_TESTS === '1';
@@ -26,7 +26,7 @@ describe('sandbox network integration', () => {
         }
 
         const sessionPath = mkdtempSync(join(tmpdir(), 'happy-sandbox-network-'));
-        const sandboxConfig: SandboxConfig = {
+        const sandboxConfig: SandboxConfig = SandboxConfigSchema.parse({
             enabled: true,
             workspaceRoot: sessionPath,
             sessionIsolation: 'strict',
@@ -38,7 +38,7 @@ describe('sandbox network integration', () => {
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: true,
-        };
+        });
 
         const cleanup = await initializeSandbox(sandboxConfig, sessionPath);
         try {

@@ -6,11 +6,12 @@
  * using filesystem storage instead of expo-secure-store.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
+import { ensurePrivateDirSync, writePrivateFileSync } from '@/utils/privateFiles';
 
 // @noble/ed25519 v3 requires explicit SHA-512 configuration via hashes object
 ed.hashes.sha512 = (message: Uint8Array) => sha512(message);
@@ -69,9 +70,7 @@ function getOpenClawDir(homeDir: string): string {
 }
 
 function ensureDir(dir: string): void {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+  ensurePrivateDirSync(dir);
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -85,7 +84,7 @@ function readJsonFile<T>(filePath: string): T | null {
 function writeJsonFile(filePath: string, data: unknown): void {
   const dir = join(filePath, '..');
   ensureDir(dir);
-  writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  writePrivateFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
 function deleteFile(filePath: string): void {

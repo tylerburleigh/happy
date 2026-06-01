@@ -123,12 +123,21 @@ happy connect status
 ### Sandbox (experimental)
 
 Happy can run agents inside an OS-level sandbox to restrict file system and network access.
+The sandbox runtime supports macOS and Linux; Windows and other platforms fail closed
+unless `allowSandboxFallback` is explicitly enabled.
+When the sandbox is enabled, Happy now fails closed if the sandbox cannot start,
+filters globally exported secret-looking environment variables from agent
+subprocesses, and uses isolated Codex/Claude homes by default.
 
 ```bash
 happy sandbox configure
 happy sandbox status
 happy sandbox disable
 ```
+
+Projects can add `.happy/sandbox.json` to tighten the global `~/.happy/settings.json`
+policy. Project policy can add read/write denies, disable localhost binding,
+require stricter session isolation, or narrow a custom network allowlist.
 
 ### Building from source
 

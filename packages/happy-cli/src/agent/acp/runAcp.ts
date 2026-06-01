@@ -8,6 +8,7 @@ import { DefaultTransport } from '@/agent/transport';
 import { AcpSessionManager } from './AcpSessionManager';
 import type { SessionEnvelope } from '@slopus/happy-wire';
 import { logger } from '@/ui/logger';
+import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { hashObject } from '@/utils/deterministicJson';
 import { Credentials, readSettings } from '@/persistence';
@@ -464,6 +465,8 @@ export async function runAcp(opts: {
     throw new Error('No machine ID found in settings');
   }
 
+  const sandboxConfig = resolveSandboxConfig(settings.sandboxConfig, process.cwd());
+
   await api.getOrCreateMachine({
     machineId: settings.machineId,
     metadata: initialMachineMetadata,
@@ -473,7 +476,7 @@ export async function runAcp(opts: {
     flavor: resolveSessionFlavor(opts.agentName),
     machineId: settings.machineId,
     startedBy: opts.startedBy,
-    sandbox: settings.sandboxConfig,
+    sandbox: sandboxConfig,
   });
   const response = await api.getOrCreateSession({ tag: sessionTag, metadata, state });
   if (response) {

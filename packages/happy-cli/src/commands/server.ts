@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync, chmodSync, statSync } from 'node:fs';
+import { existsSync, rmSync, readFileSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { configuration } from '@/configuration';
 import { updateSettings } from '@/persistence';
+import { ensurePrivateDirSync } from '@/utils/privateFiles';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,7 +76,7 @@ export async function handleServerCommand(args: string[]): Promise<void> {
         rmSync(dataDir, { recursive: true, force: true });
     }
 
-    mkdirSync(dataDir, { recursive: true });
+    ensurePrivateDirSync(dataDir);
 
     const masterSecret = opts.masterSecret ?? loadOrCreateMasterSecret(secretFile);
 

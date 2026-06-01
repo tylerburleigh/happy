@@ -5,14 +5,15 @@
  */
 
 import { FileHandle } from 'node:fs/promises'
-import { readFile, writeFile, mkdir, open, unlink, rename, stat } from 'node:fs/promises'
-import { existsSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs'
+import { readFile, writeFile, open, unlink, rename, stat } from 'node:fs/promises'
+import { existsSync, writeFileSync, readFileSync, unlinkSync, renameSync, chmodSync } from 'node:fs'
 import { constants } from 'node:fs'
 import { configuration } from '@/configuration'
 import * as z from 'zod';
 import { encodeBase64, decodeBase64 } from '@/api/encryption';
 import type { Metadata } from '@/api/types';
 import { logger } from '@/ui/logger';
+import { ensurePrivateDir, PRIVATE_FILE_MODE, writePrivateFile } from '@/utils/privateFiles';
 
 export const SandboxConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -26,6 +27,11 @@ export const SandboxConfigSchema = z.object({
   allowedDomains: z.array(z.string()).default([]),
   deniedDomains: z.array(z.string()).default([]),
   allowLocalBinding: z.boolean().default(true),
+  allowSandboxFallback: z.boolean().default(false),
+  agentHomeMode: z.enum(['isolated', 'shared']).default('isolated'),
+  isolatedCodexHome: z.string().default('~/.happy/agent-homes/codex'),
+  isolatedClaudeConfigDir: z.string().default('~/.happy/agent-homes/claude'),
+  envPassthrough: z.array(z.string()).default([]),
 });
 
 export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
@@ -73,6 +79,7 @@ function migrateSettings(raw: any, fromVersion: number): any {
 export interface DaemonLocallyPersistedState {
   pid: number;
   httpPort: number;
+  controlToken?: string;
   startTime: string;
   startedWithCliVersion: string;
   lastHeartbeat?: string;
@@ -123,7 +130,7 @@ export async function readSettings(): Promise<Settings> {
 
 export async function writeSettings(settings: Settings): Promise<void> {
   if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true })
+    await ensurePrivateDir(configuration.happyHomeDir)
   }
 
   // Ensure schema version is set before writing
@@ -132,7 +139,7 @@ export async function writeSettings(settings: Settings): Promise<void> {
     schemaVersion: settings.schemaVersion ?? SUPPORTED_SCHEMA_VERSION
   };
 
-  await writeFile(configuration.settingsFile, JSON.stringify(settingsWithVersion, null, 2))
+  await writePrivateFile(configuration.settingsFile, JSON.stringify(settingsWithVersion, null, 2))
 }
 
 /**
@@ -157,7 +164,7 @@ export async function updateSettings(
   while (attempts < MAX_LOCK_ATTEMPTS) {
     try {
       // O_CREAT | O_EXCL | O_WRONLY = create exclusively, fail if exists
-      fileHandle = await open(lockFile, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY);
+      fileHandle = await open(lockFile, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, PRIVATE_FILE_MODE);
       break;
     } catch (err: any) {
       if (err.code === 'EEXIST') {
@@ -191,12 +198,13 @@ export async function updateSettings(
 
     // Ensure directory exists
     if (!existsSync(configuration.happyHomeDir)) {
-      await mkdir(configuration.happyHomeDir, { recursive: true });
+      await ensurePrivateDir(configuration.happyHomeDir);
     }
 
     // Write atomically using rename
-    await writeFile(tmpFile, JSON.stringify(updated, null, 2));
+    await writeFile(tmpFile, JSON.stringify(updated, null, 2), { mode: PRIVATE_FILE_MODE });
     await rename(tmpFile, configuration.settingsFile); // Atomic on POSIX
+    try { chmodSync(configuration.settingsFile, PRIVATE_FILE_MODE); } catch { }
 
     return updated;
   } finally {
@@ -261,9 +269,9 @@ export async function readCredentials(): Promise<Credentials | null> {
 
 export async function writeCredentialsLegacy(credentials: { secret: Uint8Array, token: string }): Promise<void> {
   if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true })
+    await ensurePrivateDir(configuration.happyHomeDir)
   }
-  await writeFile(configuration.privateKeyFile, JSON.stringify({
+  await writePrivateFile(configuration.privateKeyFile, JSON.stringify({
     secret: encodeBase64(credentials.secret),
     token: credentials.token
   }, null, 2));
@@ -271,9 +279,9 @@ export async function writeCredentialsLegacy(credentials: { secret: Uint8Array, 
 
 export async function writeCredentialsDataKey(credentials: { publicKey: Uint8Array, machineKey: Uint8Array, token: string }): Promise<void> {
   if (!existsSync(configuration.happyHomeDir)) {
-    await mkdir(configuration.happyHomeDir, { recursive: true })
+    await ensurePrivateDir(configuration.happyHomeDir)
   }
-  await writeFile(configuration.privateKeyFile, JSON.stringify({
+  await writePrivateFile(configuration.privateKeyFile, JSON.stringify({
     encryption: { publicKey: encodeBase64(credentials.publicKey), machineKey: encodeBase64(credentials.machineKey) },
     token: credentials.token
   }, null, 2));
@@ -313,7 +321,8 @@ export async function readDaemonState(): Promise<DaemonLocallyPersistedState | n
  * Write daemon state to local file (synchronously for atomic operation)
  */
 export function writeDaemonState(state: DaemonLocallyPersistedState): void {
-  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), 'utf-8');
+  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), { encoding: 'utf-8', mode: PRIVATE_FILE_MODE });
+  try { chmodSync(configuration.daemonStateFile, PRIVATE_FILE_MODE); } catch { }
 }
 
 /**
@@ -347,7 +356,8 @@ export async function acquireDaemonLock(
       // O_EXCL ensures we only create if it doesn't exist (atomic lock acquisition)
       const fileHandle = await open(
         configuration.daemonLockFile,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+        PRIVATE_FILE_MODE,
       );
       // Write PID to lock file for debugging
       await fileHandle.writeFile(String(process.pid));
@@ -438,10 +448,10 @@ export function persistSession(sessionId: string, session: PersistedSession): vo
     const existing = readPersistedSessions();
     existing[sessionId] = session;
     const tmpFile = configuration.sessionsFile + '.tmp';
-    writeFileSync(tmpFile, JSON.stringify({ sessions: existing }, null, 2), 'utf-8');
+    writeFileSync(tmpFile, JSON.stringify({ sessions: existing }, null, 2), { encoding: 'utf-8', mode: PRIVATE_FILE_MODE });
     renameSync(tmpFile, configuration.sessionsFile);
+    try { chmodSync(configuration.sessionsFile, PRIVATE_FILE_MODE); } catch { }
   } catch (error) {
     logger.debug(`[PERSISTENCE] Failed to persist session ${sessionId}:`, error);
   }
 }
-

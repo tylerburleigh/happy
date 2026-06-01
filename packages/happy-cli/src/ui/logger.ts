@@ -6,11 +6,12 @@
  */
 
 import chalk from 'chalk'
-import { appendFileSync } from 'fs'
+import { appendFileSync, chmodSync } from 'fs'
 import { inspect } from 'node:util'
 import { configuration } from '@/configuration'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { PRIVATE_FILE_MODE } from '@/utils/privateFiles'
 // Note: readDaemonState is imported lazily inside listDaemonLogFiles() to avoid
 // circular dependency: logger.ts ↔ persistence.ts
 
@@ -221,7 +222,10 @@ class Logger {
     
     // Handle async file path
     try {
-      appendFileSync(this.logFilePath, logLine)
+      appendFileSync(this.logFilePath, logLine, { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+      try {
+        chmodSync(this.logFilePath, PRIVATE_FILE_MODE)
+      } catch { }
     } catch (appendError) {
       if (process.env.DEBUG) {
         console.error('[DEV MODE ONLY THROWING] Failed to append to log file:', appendError)

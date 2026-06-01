@@ -6,10 +6,11 @@
  */
 
 import { join, resolve } from 'node:path';
-import { writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { unlinkSync, existsSync } from 'node:fs';
 import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { projectPath } from '@/projectPath';
+import { ensurePrivateDirSync, writePrivateFileSync } from '@/utils/privateFiles';
 
 /**
  * Generate a temporary settings file with SessionStart hook configuration
@@ -17,9 +18,9 @@ import { projectPath } from '@/projectPath';
  * @param port - The port where Happy server is listening
  * @returns Path to the generated settings file
  */
-export function generateHookSettingsFile(port: number): string {
+export function generateHookSettingsFile(port: number, options?: { enableSandboxGuards?: boolean }): string {
     const hooksDir = join(configuration.happyHomeDir, 'tmp', 'hooks');
-    mkdirSync(hooksDir, { recursive: true });
+    ensurePrivateDirSync(hooksDir);
 
     // Unique filename per process to avoid conflicts
     const filename = `session-hook-${process.pid}.json`;
@@ -28,8 +29,15 @@ export function generateHookSettingsFile(port: number): string {
     // Path to the hook forwarder script
     const forwarderScript = resolve(projectPath(), 'scripts', 'session_hook_forwarder.cjs');
     const hookCommand = `node "${forwarderScript}" ${port}`;
+    const sandboxGuardScript = resolve(projectPath(), 'scripts', 'sandbox_secret_guard.cjs');
+    const sandboxGuardCommand = `node "${sandboxGuardScript}"`;
 
-    const settings = {
+    const settings: {
+        hooks: Record<string, Array<{
+            matcher: string;
+            hooks: Array<{ type: 'command'; command: string }>;
+        }>>;
+    } = {
         hooks: {
             SessionStart: [
                 {
@@ -45,7 +53,21 @@ export function generateHookSettingsFile(port: number): string {
         }
     };
 
-    writeFileSync(filepath, JSON.stringify(settings, null, 2));
+    if (options?.enableSandboxGuards) {
+        settings.hooks.PreToolUse = [
+            {
+                matcher: "Bash",
+                hooks: [
+                    {
+                        type: "command",
+                        command: sandboxGuardCommand,
+                    },
+                ],
+            },
+        ];
+    }
+
+    writePrivateFileSync(filepath, JSON.stringify(settings, null, 2));
     logger.debug(`[generateHookSettings] Created hook settings file: ${filepath}`);
 
     return filepath;
@@ -66,4 +88,3 @@ export function cleanupHookSettingsFile(filepath: string): void {
         logger.debug(`[generateHookSettings] Failed to cleanup hook settings file: ${error}`);
     }
 }
-

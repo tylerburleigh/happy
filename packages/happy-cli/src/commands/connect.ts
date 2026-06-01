@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { readCredentials } from '@/persistence';
@@ -8,6 +8,7 @@ import { authenticateCodex } from './connect/authenticateCodex';
 import { authenticateClaude } from './connect/authenticateClaude';
 import { authenticateGemini } from './connect/authenticateGemini';
 import { decodeJwtPayload } from './connect/utils';
+import { ensurePrivateDirSync, writePrivateFileSync } from '@/utils/privateFiles';
 
 /**
  * Handle connect subcommand
@@ -195,10 +196,7 @@ function updateLocalGeminiCredentials(tokens: {
         const geminiDir = join(homedir(), '.gemini');
         const credentialsPath = join(geminiDir, 'oauth_creds.json');
         
-        // Create directory if it doesn't exist
-        if (!existsSync(geminiDir)) {
-            mkdirSync(geminiDir, { recursive: true });
-        }
+        ensurePrivateDirSync(geminiDir);
         
         // Write credentials in the format Gemini CLI expects
         const credentials = {
@@ -210,7 +208,7 @@ function updateLocalGeminiCredentials(tokens: {
             ...(tokens.expires_in && { expires_in: tokens.expires_in }),
         };
         
-        writeFileSync(credentialsPath, JSON.stringify(credentials, null, 2), 'utf-8');
+        writePrivateFileSync(credentialsPath, JSON.stringify(credentials, null, 2));
         console.log(chalk.gray(`  Updated local credentials: ${credentialsPath}`));
     } catch (error) {
         // Non-critical error - server tokens will still work

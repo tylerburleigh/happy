@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
-import type { SandboxConfig } from '@/persistence';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 import {
     initializeSandbox,
     wrapCommand,
@@ -53,7 +53,7 @@ describe('sandbox manager', () => {
     });
 
     it('initializes sandbox for allowed network mode and returns cleanup function', async () => {
-        const sandboxConfig: SandboxConfig = {
+        const sandboxConfig: SandboxConfig = SandboxConfigSchema.parse({
             enabled: true,
             sessionIsolation: 'workspace',
             customWritePaths: [],
@@ -64,7 +64,7 @@ describe('sandbox manager', () => {
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: true,
-        };
+        });
 
         const cleanup = await initializeSandbox(sandboxConfig, '/workspace/session');
 
@@ -76,7 +76,7 @@ describe('sandbox manager', () => {
     });
 
     it('initializes sandbox runtime for blocked network mode', async () => {
-        const sandboxConfig: SandboxConfig = {
+        const sandboxConfig: SandboxConfig = SandboxConfigSchema.parse({
             enabled: true,
             sessionIsolation: 'workspace',
             customWritePaths: [],
@@ -87,7 +87,7 @@ describe('sandbox manager', () => {
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: false,
-        };
+        });
 
         await initializeSandbox(sandboxConfig, '/workspace/session');
 
@@ -111,6 +111,14 @@ describe('sandbox manager', () => {
             command: 'sh',
             args: ['-c', 'sandbox codex command'],
         });
+    });
+
+    it('quotes MCP transport arguments before wrapping', async () => {
+        mockWrapWithSandbox.mockResolvedValue('sandbox quoted command');
+
+        await wrapForMcpTransport('custom cmd', ['--flag', 'value with spaces']);
+
+        expect(mockWrapWithSandbox).toHaveBeenCalledWith("'custom cmd' --flag 'value with spaces'");
     });
 
 });

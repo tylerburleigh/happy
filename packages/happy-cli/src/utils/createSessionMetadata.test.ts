@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { SandboxConfig } from '@/persistence';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 import { createSessionMetadata } from './createSessionMetadata';
 
 function createSandboxConfig(overrides: Partial<SandboxConfig> = {}): SandboxConfig {
-    return {
+    return SandboxConfigSchema.parse({
         enabled: true,
         workspaceRoot: '~/Developer',
         sessionIsolation: 'workspace',
@@ -16,7 +16,7 @@ function createSandboxConfig(overrides: Partial<SandboxConfig> = {}): SandboxCon
         deniedDomains: [],
         allowLocalBinding: true,
         ...overrides,
-    };
+    });
 }
 
 describe('createSessionMetadata', () => {

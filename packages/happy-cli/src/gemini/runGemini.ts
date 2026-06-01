@@ -51,6 +51,7 @@ import {
   formatOptionsXml,
 } from '@/gemini/utils/optionsParser';
 import { ConversationHistory } from '@/gemini/utils/conversationHistory';
+import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
 
 
 /**
@@ -79,7 +80,7 @@ export async function runGemini(opts: {
 
   const settings = await readSettings();
   const machineId = settings?.machineId;
-  const sandboxConfig = settings?.sandboxConfig;
+  const sandboxConfig = resolveSandboxConfig(settings?.sandboxConfig, process.cwd());
   if (!machineId) {
     console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on https://github.com/slopus/happy-cli/issues`);
     process.exit(1);

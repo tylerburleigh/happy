@@ -1,8 +1,8 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildSandboxRuntimeConfig } from './config';
-import type { SandboxConfig } from '@/persistence';
+import { buildSandboxRuntimeConfig, getProtectedCommandPaths } from './config';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 
 const sessionPath = '/tmp/happy-session';
 
@@ -14,17 +14,25 @@ function resolveLikeRuntime(pathValue: string): string {
     return resolve(sessionPath, expandedHome);
 }
 
-function expectedSharedAgentStatePaths(): string[] {
-    const codexHome = process.env.CODEX_HOME || '~/.codex';
-    const claudeConfigDir = process.env.CLAUDE_CONFIG_DIR || '~/.claude';
+function expectedSharedAgentStatePaths(config: SandboxConfig): string[] {
+    const codexHome = config.agentHomeMode === 'shared'
+        ? process.env.CODEX_HOME || '~/.codex'
+        : config.isolatedCodexHome;
+    const claudeConfigDir = config.agentHomeMode === 'shared'
+        ? process.env.CLAUDE_CONFIG_DIR || '~/.claude'
+        : config.isolatedClaudeConfigDir;
     return [...new Set([
         resolveLikeRuntime(codexHome),
         resolveLikeRuntime(claudeConfigDir),
     ])];
 }
 
+function expectedProtectedCommandPaths(): string[] {
+    return getProtectedCommandPaths(process.platform);
+}
+
 function createConfig(overrides: Partial<SandboxConfig> = {}): SandboxConfig {
-    return {
+    return SandboxConfigSchema.parse({
         enabled: true,
         workspaceRoot: '~/projects',
         sessionIsolation: 'workspace',
@@ -37,13 +45,34 @@ function createConfig(overrides: Partial<SandboxConfig> = {}): SandboxConfig {
         deniedDomains: [],
         allowLocalBinding: true,
         ...overrides,
-    };
+    });
 }
 
 describe('buildSandboxRuntimeConfig', () => {
+    it('uses platform-specific protected command deny paths', () => {
+        expect(getProtectedCommandPaths('darwin')).toEqual(expect.arrayContaining([
+            '/usr/bin/security',
+            '/usr/bin/pbpaste',
+            '/opt/homebrew/bin/gh',
+            '/usr/local/bin/aws',
+            '/usr/bin/ssh-add',
+        ]));
+
+        expect(getProtectedCommandPaths('linux')).toEqual(expect.arrayContaining([
+            '/usr/bin/gh',
+            '/usr/bin/secret-tool',
+            '/usr/bin/pass',
+            '/usr/bin/keyctl',
+            '/usr/bin/wl-paste',
+        ]));
+
+        expect(getProtectedCommandPaths('win32')).toEqual([]);
+    });
+
     it('builds strict filesystem isolation', () => {
+        const config = createConfig({ sessionIsolation: 'strict' });
         const runtimeConfig = buildSandboxRuntimeConfig(
-            createConfig({ sessionIsolation: 'strict' }),
+            config,
             sessionPath,
         );
 
@@ -51,37 +80,40 @@ describe('buildSandboxRuntimeConfig', () => {
         expect(runtimeConfig.filesystem?.allowWrite).toEqual([
             resolve(sessionPath),
             '/tmp',
-            ...expectedSharedAgentStatePaths(),
+            ...expectedSharedAgentStatePaths(config),
         ]);
     });
 
     it('builds workspace isolation using workspaceRoot fallback to sessionPath', () => {
-        const withWorkspaceRoot = buildSandboxRuntimeConfig(createConfig(), sessionPath);
+        const config = createConfig();
+        const withWorkspaceRoot = buildSandboxRuntimeConfig(config, sessionPath);
         expect(withWorkspaceRoot.filesystem?.allowWrite).toEqual([
             `${homedir()}/projects`,
             resolve(sessionPath),
             '/tmp',
-            ...expectedSharedAgentStatePaths(),
+            ...expectedSharedAgentStatePaths(config),
         ]);
 
+        const withoutWorkspaceConfig = createConfig({ workspaceRoot: undefined });
         const withoutWorkspaceRoot = buildSandboxRuntimeConfig(
-            createConfig({ workspaceRoot: undefined }),
+            withoutWorkspaceConfig,
             sessionPath,
         );
         expect(withoutWorkspaceRoot.filesystem?.allowWrite).toEqual([
             resolve(sessionPath),
             '/tmp',
-            ...expectedSharedAgentStatePaths(),
+            ...expectedSharedAgentStatePaths(withoutWorkspaceConfig),
         ]);
     });
 
     it('builds custom isolation from explicit custom paths', () => {
+        const config = createConfig({
+            sessionIsolation: 'custom',
+            customWritePaths: ['~/sandbox', 'relative/write'],
+            extraWritePaths: ['/tmp', '../scratch'],
+        });
         const runtimeConfig = buildSandboxRuntimeConfig(
-            createConfig({
-                sessionIsolation: 'custom',
-                customWritePaths: ['~/sandbox', 'relative/write'],
-                extraWritePaths: ['/tmp', '../scratch'],
-            }),
+            config,
             sessionPath,
         );
 
@@ -90,7 +122,7 @@ describe('buildSandboxRuntimeConfig', () => {
             resolve(sessionPath, 'relative/write'),
             '/tmp',
             resolve(sessionPath, '../scratch'),
-            ...expectedSharedAgentStatePaths(),
+            ...expectedSharedAgentStatePaths(config),
         ]);
     });
 
@@ -128,14 +160,15 @@ describe('buildSandboxRuntimeConfig', () => {
     });
 
     it('resolves tilde and relative paths across all filesystem path fields', () => {
+        const config = createConfig({
+            sessionIsolation: 'custom',
+            customWritePaths: ['~/custom', 'relative/custom'],
+            extraWritePaths: ['~/extra', './extra'],
+            denyReadPaths: ['~/.ssh', 'relative/read'],
+            denyWritePaths: ['.env', 'relative/write-deny'],
+        });
         const runtimeConfig = buildSandboxRuntimeConfig(
-            createConfig({
-                sessionIsolation: 'custom',
-                customWritePaths: ['~/custom', 'relative/custom'],
-                extraWritePaths: ['~/extra', './extra'],
-                denyReadPaths: ['~/.ssh', 'relative/read'],
-                denyWritePaths: ['.env', 'relative/write-deny'],
-            }),
+            config,
             sessionPath,
         );
 
@@ -144,11 +177,12 @@ describe('buildSandboxRuntimeConfig', () => {
             resolve(sessionPath, 'relative/custom'),
             `${homedir()}/extra`,
             resolve(sessionPath, './extra'),
-            ...expectedSharedAgentStatePaths(),
+            ...expectedSharedAgentStatePaths(config),
         ]);
         expect(runtimeConfig.filesystem?.denyRead).toEqual([
             `${homedir()}/.ssh`,
             resolve(sessionPath, 'relative/read'),
+            ...expectedProtectedCommandPaths(),
         ]);
         expect(runtimeConfig.filesystem?.denyWrite).toEqual([
             resolve(sessionPath, '.env'),
@@ -156,7 +190,7 @@ describe('buildSandboxRuntimeConfig', () => {
         ]);
     });
 
-    it('includes overridden CODEX_HOME and CLAUDE_CONFIG_DIR in allowWrite', () => {
+    it('includes overridden CODEX_HOME and CLAUDE_CONFIG_DIR in allowWrite when shared agent homes are enabled', () => {
         const originalCodexHome = process.env.CODEX_HOME;
         const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 
@@ -164,7 +198,7 @@ describe('buildSandboxRuntimeConfig', () => {
             process.env.CODEX_HOME = '~/custom-codex-home';
             process.env.CLAUDE_CONFIG_DIR = './custom-claude-config';
 
-            const runtimeConfig = buildSandboxRuntimeConfig(createConfig(), sessionPath);
+            const runtimeConfig = buildSandboxRuntimeConfig(createConfig({ agentHomeMode: 'shared' }), sessionPath);
 
             expect(runtimeConfig.filesystem?.allowWrite).toContain(`${homedir()}/custom-codex-home`);
             expect(runtimeConfig.filesystem?.allowWrite).toContain(resolve(sessionPath, './custom-claude-config'));

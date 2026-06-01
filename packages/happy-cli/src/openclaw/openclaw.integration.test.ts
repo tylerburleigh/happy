@@ -387,6 +387,14 @@ describe.skipIf(!gatewayAvailable)('OpenClaw integration - full message pipeline
 // ── 4. Daemon lifecycle ─────────────────────────────────────────────────────
 
 describe.skipIf(!gatewayAvailable)('OpenClaw integration - daemon lifecycle', { timeout: 30000 }, () => {
+  function daemonControlHeaders(state: Awaited<ReturnType<typeof readDaemonState>>): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'X-Happy-Daemon-Control': 'true',
+      ...(state?.controlToken ? { Authorization: `Bearer ${state.controlToken}` } : {}),
+    };
+  }
+
   it('should spawn openclaw session via daemon and stop it cleanly', async () => {
     const daemonRunning = await isDaemonRunning();
     if (!daemonRunning) {
@@ -404,7 +412,7 @@ describe.skipIf(!gatewayAvailable)('OpenClaw integration - daemon lifecycle', { 
     const port = state!.httpPort;
     const spawnResponse = await fetch(`http://127.0.0.1:${port}/spawn-session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: daemonControlHeaders(state),
       body: JSON.stringify({
         directory: integrationEnv.projectPath,
         agent: 'openclaw',
@@ -467,7 +475,7 @@ describe.skipIf(!gatewayAvailable)('OpenClaw integration - daemon lifecycle', { 
 
     const spawn1 = await fetch(`http://127.0.0.1:${port}/spawn-session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: daemonControlHeaders(state),
       body: JSON.stringify({
         directory: integrationEnv.projectPath,
         agent: 'openclaw',
@@ -486,7 +494,7 @@ describe.skipIf(!gatewayAvailable)('OpenClaw integration - daemon lifecycle', { 
 
     const spawn2 = await fetch(`http://127.0.0.1:${port}/spawn-session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: daemonControlHeaders(state),
       body: JSON.stringify({
         directory: integrationEnv.projectPath,
         agent: 'openclaw',

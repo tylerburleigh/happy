@@ -1,0 +1,40 @@
+{
+  "_comment": "Project-level Happy sandbox restrictions. This file can only tighten the global ~/.happy sandbox policy.",
+  "enabled": true,
+  "sessionIsolation": "strict",
+  "denyReadPaths": [
+    "~/.ssh",
+    "~/.aws",
+    "~/.gnupg",
+    "~/.kube",
+    "~/.docker",
+    "~/.config/gh",
+    "~/.config/gcloud",
+    "~/.npmrc",
+    "~/.pypirc",
+    "~/.netrc",
+    "~/.git-credentials",
+    "~/.terraform.d",
+    "~/Library/Keychains"
+  ],
+  "denyWritePaths": [
+    ".env",
+    ".env.local",
+    ".env.*",
+    ".git/hooks",
+    ".git/config",
+    "~/.zshrc",
+    "~/.bashrc",
+    "~/.profile",
+    "~/.gitconfig",
+    "~/.git-credentials",
+    "~/.happy/settings.json",
+    "~/.happy/access.key",
+    "~/.claude/settings.json",
+    "~/.claude/settings.local.json",
+    "~/.codex/config.toml"
+  ],
+  "allowSandboxFallback": false,
+  "agentHomeMode": "isolated",
+  "allowLocalBinding": true
+}

@@ -10,7 +10,38 @@ import {
 } from '@/persistence';
 
 const DEFAULT_WORKSPACE_ROOT = '~/Workspace';
-const DEFAULT_DENY_READ_PATHS = ['~/.ssh', '~/.aws', '~/.gnupg'];
+const DEFAULT_DENY_READ_PATHS = [
+    '~/.ssh',
+    '~/.aws',
+    '~/.gnupg',
+    '~/.kube',
+    '~/.docker',
+    '~/.config/gh',
+    '~/.azure',
+    '~/.npmrc',
+    '~/.pypirc',
+    '~/.netrc',
+    '~/.git-credentials',
+    '~/.terraform.d',
+    '~/Library/Keychains',
+];
+const DEFAULT_DENY_WRITE_PATHS = [
+    '.env',
+    '.env.local',
+    '.env.*',
+    '.git/hooks',
+    '.git/config',
+    '~/.zshrc',
+    '~/.bashrc',
+    '~/.profile',
+    '~/.gitconfig',
+    '~/.git-credentials',
+    '~/.happy/settings.json',
+    '~/.happy/access.key',
+    '~/.claude/settings.json',
+    '~/.claude/settings.local.json',
+    '~/.codex/config.toml',
+];
 
 type ScopeMode = 'workspace' | 'project';
 
@@ -121,11 +152,14 @@ export async function handleSandboxConfigure(): Promise<void> {
         customWritePaths: [],
         denyReadPaths: DEFAULT_DENY_READ_PATHS,
         extraWritePaths: ['/tmp'],
-        denyWritePaths: ['.env'],
+        denyWritePaths: DEFAULT_DENY_WRITE_PATHS,
         networkMode: answers.networkMode,
         allowedDomains: [],
         deniedDomains: [],
         allowLocalBinding: Boolean(answers.allowLocalBinding),
+        allowSandboxFallback: false,
+        agentHomeMode: 'isolated',
+        envPassthrough: [],
     });
 
     console.log(chalk.bold('\nSandbox configuration summary:'));
@@ -172,6 +206,12 @@ export async function handleSandboxStatus(): Promise<void> {
     }
     console.log(`Network mode: ${config.networkMode}`);
     console.log(`Allow localhost binding: ${config.allowLocalBinding ? 'yes' : 'no'}`);
+    console.log(`Sandbox failure fallback: ${config.allowSandboxFallback ? 'yes' : 'no'}`);
+    console.log(`Agent homes: ${config.agentHomeMode}`);
+    if (config.agentHomeMode === 'isolated') {
+        console.log(`Codex home: ${config.isolatedCodexHome}`);
+        console.log(`Claude config dir: ${config.isolatedClaudeConfigDir}`);
+    }
 }
 
 export async function handleSandboxDisable(): Promise<void> {
