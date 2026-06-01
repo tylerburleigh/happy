@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SandboxConfig } from '@/persistence';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 import {
     detectWorkspaceRootSuggestions,
     handleSandboxCommand,
@@ -46,6 +46,12 @@ describe('handleSandboxCommand', () => {
         await handleSandboxCommand(['configure']);
 
         expect(mockPrompt).toHaveBeenCalled();
+        expect(mockPrompt.mock.calls[0]?.[0]).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                name: 'scopeMode',
+                default: 'project',
+            }),
+        ]));
     });
 
     it('routes status subcommand', async () => {
@@ -98,7 +104,7 @@ describe('handleSandboxStatus', () => {
     });
 
     it('prints formatted sandbox configuration when present', async () => {
-        const config: SandboxConfig = {
+        const config: SandboxConfig = SandboxConfigSchema.parse({
             enabled: true,
             workspaceRoot: '~/projects',
             sessionIsolation: 'workspace',
@@ -110,7 +116,7 @@ describe('handleSandboxStatus', () => {
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: true,
-        };
+        });
 
         mockReadSettings.mockResolvedValue({ sandboxConfig: config });
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

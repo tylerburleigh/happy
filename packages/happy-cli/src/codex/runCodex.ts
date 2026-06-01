@@ -33,8 +33,14 @@ import type { PermissionMode } from '@/api/types';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { resolveCodexExecutionPolicy } from './executionPolicy';
 import { mapCodexMcpMessageToSessionEnvelopes, mapCodexProcessorMessageToSessionEnvelopes } from './utils/sessionProtocolMapper';
+import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
 import { resumeExistingThread } from './resumeExistingThread';
 import { emitReadyIfIdle } from './emitReadyIfIdle';
+import {
+    evaluateFileChangeSecurityPolicy,
+    evaluateShellSecurityPolicy,
+    type SecurityPolicyDecision,
+} from '@/security/policy';
 
 /**
  * Extracts a human-readable error from a codex task_complete/turn_aborted event.
@@ -49,6 +55,20 @@ function describeCodexFailure(msg: any): string | null {
         return err.message;
     }
     return 'Unknown error';
+}
+
+function attachSecurityPolicy(input: unknown, securityPolicy: SecurityPolicyDecision): unknown {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        return {
+            ...(input as Record<string, unknown>),
+            securityPolicy,
+        };
+    }
+
+    return {
+        input,
+        securityPolicy,
+    };
 }
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
@@ -107,7 +127,7 @@ export async function runCodex(opts: {
 
     const settings = await readSettings();
     let machineId = settings?.machineId;
-    const sandboxConfig = opts.noSandbox ? undefined : settings?.sandboxConfig;
+    const sandboxConfig = opts.noSandbox ? undefined : resolveSandboxConfig(settings?.sandboxConfig, process.cwd());
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on https://github.com/slopus/happy-cli/issues`);
         process.exit(1);
@@ -128,6 +148,7 @@ export async function runCodex(opts: {
         machineId,
         startedBy: opts.startedBy,
         sandbox: sandboxConfig,
+        sandboxStatus: sandboxConfig?.enabled ? 'configured' : 'disabled',
         dangerouslySkipPermissions: initialPermissionMode === 'yolo' || initialPermissionMode === 'bypassPermissions',
     });
 
@@ -540,6 +561,32 @@ export async function runCodex(opts: {
                 : (params.input ?? {});
 
         try {
+            const securityPolicy = params.type === 'exec'
+                ? evaluateShellSecurityPolicy({ command: params.command, cwd: params.cwd })
+                : params.type === 'patch'
+                    ? evaluateFileChangeSecurityPolicy({ fileChanges: params.fileChanges, cwd: process.cwd() })
+                    : null;
+
+            if (securityPolicy) {
+                if (securityPolicy.decision === 'deny') {
+                    logger.debug('[Codex] Security policy denied approval:', securityPolicy);
+                    return 'denied';
+                }
+
+                const inputWithPolicy = attachSecurityPolicy(input, securityPolicy);
+
+                if (securityPolicy.decision === 'ask') {
+                    const result = await permissionHandler.requestUserApproval(params.callId, toolName, inputWithPolicy);
+                    logger.debug('[Codex] Security policy permission result:', result.decision);
+                    return result.decision;
+                }
+
+                if (client.sandboxEnabled) {
+                    logger.debug('[Codex] Security policy auto-approved sandboxed operation:', securityPolicy.category);
+                    return 'approved';
+                }
+            }
+
             const result = await permissionHandler.handleToolCall(params.callId, toolName, input);
             logger.debug('[Codex] Permission result:', result.decision);
             return result.decision;
@@ -676,6 +723,13 @@ export async function runCodex(opts: {
         logger.debug('[codex]: client.connect begin');
         await client.connect();
         logger.debug('[codex]: client.connect done');
+        if (sandboxConfig?.enabled) {
+            session.updateMetadata((currentMetadata) => ({
+                ...currentMetadata,
+                sandbox: sandboxConfig,
+                sandboxStatus: client.sandboxEnabled ? 'enforced' : 'unavailable',
+            }));
+        }
 
         if (opts.resumeThreadId) {
             await resumeExistingThread({

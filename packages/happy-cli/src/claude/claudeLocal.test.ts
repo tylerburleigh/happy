@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { claudeLocal } from './claudeLocal';
+import { SandboxConfigSchema } from '@/persistence';
 
 // Use vi.hoisted to ensure mock functions are available when vi.mock factory runs
 const {
@@ -8,12 +9,16 @@ const {
     mockInitializeSandbox,
     mockWrapCommand,
     mockSandboxCleanup,
+    mockBuildSandboxedProcessEnv,
+    mockIsSandboxRuntimePlatformSupported,
 } = vi.hoisted(() => ({
     mockSpawn: vi.fn(),
     mockClaudeFindLastSession: vi.fn(),
     mockInitializeSandbox: vi.fn(),
     mockWrapCommand: vi.fn(),
     mockSandboxCleanup: vi.fn(),
+    mockBuildSandboxedProcessEnv: vi.fn(),
+    mockIsSandboxRuntimePlatformSupported: vi.fn(),
 }));
 
 vi.mock('cross-spawn', () => ({
@@ -54,6 +59,15 @@ vi.mock('@/sandbox/manager', () => ({
     wrapCommand: mockWrapCommand,
 }));
 
+vi.mock('@/sandbox/env', () => ({
+    buildSandboxedProcessEnv: mockBuildSandboxedProcessEnv,
+}));
+
+vi.mock('@/sandbox/platform', () => ({
+    isSandboxRuntimePlatformSupported: mockIsSandboxRuntimePlatformSupported,
+    supportedSandboxPlatformSummary: vi.fn(() => 'macOS and Linux'),
+}));
+
 describe('claudeLocal --continue handling', () => {
     let onSessionFound: any;
 
@@ -84,6 +98,12 @@ describe('claudeLocal --continue handling', () => {
         vi.clearAllMocks();
         mockInitializeSandbox.mockResolvedValue(mockSandboxCleanup);
         mockWrapCommand.mockResolvedValue('wrapped claude command');
+        mockBuildSandboxedProcessEnv.mockReturnValue({
+            PATH: '/usr/bin',
+            CODEX_HOME: '/tmp/codex',
+            CLAUDE_CONFIG_DIR: '/tmp/claude',
+        });
+        mockIsSandboxRuntimePlatformSupported.mockReturnValue(true);
     });
 
     it('should convert --continue to --resume with last session ID', async () => {
@@ -255,7 +275,7 @@ describe('claudeLocal --continue handling', () => {
             path: '/tmp/workspace',
             onSessionFound,
             claudeArgs: [],
-            sandboxConfig: {
+            sandboxConfig: SandboxConfigSchema.parse({
                 enabled: true,
                 workspaceRoot: '~/projects',
                 sessionIsolation: 'workspace',
@@ -267,7 +287,7 @@ describe('claudeLocal --continue handling', () => {
                 allowedDomains: [],
                 deniedDomains: [],
                 allowLocalBinding: true,
-            },
+            }),
         });
 
         expect(mockInitializeSandbox).toHaveBeenCalledWith(
@@ -283,16 +303,16 @@ describe('claudeLocal --continue handling', () => {
         expect(mockSandboxCleanup).toHaveBeenCalledTimes(1);
     });
 
-    it('should continue without sandbox when initialization fails', async () => {
+    it('should fail closed when sandbox initialization fails', async () => {
         mockInitializeSandbox.mockRejectedValue(new Error('sandbox failed'));
 
-        await claudeLocal({
+        await expect(claudeLocal({
             abort: new AbortController().signal,
             sessionId: null,
             path: '/tmp',
             onSessionFound,
             claudeArgs: [],
-            sandboxConfig: {
+            sandboxConfig: SandboxConfigSchema.parse({
                 enabled: true,
                 sessionIsolation: 'workspace',
                 customWritePaths: [],
@@ -303,7 +323,62 @@ describe('claudeLocal --continue handling', () => {
                 allowedDomains: [],
                 deniedDomains: [],
                 allowLocalBinding: true,
-            },
+            }),
+        })).rejects.toThrow('sandbox failed');
+
+        expect(mockWrapCommand).not.toHaveBeenCalled();
+        expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it('should fail closed when sandbox is unsupported on the current platform', async () => {
+        mockIsSandboxRuntimePlatformSupported.mockReturnValue(false);
+
+        await expect(claudeLocal({
+            abort: new AbortController().signal,
+            sessionId: null,
+            path: '/tmp',
+            onSessionFound,
+            claudeArgs: [],
+            sandboxConfig: SandboxConfigSchema.parse({
+                enabled: true,
+                sessionIsolation: 'workspace',
+                customWritePaths: [],
+                denyReadPaths: ['~/.ssh'],
+                extraWritePaths: ['/tmp'],
+                denyWritePaths: ['.env'],
+                networkMode: 'allowed',
+                allowedDomains: [],
+                deniedDomains: [],
+                allowLocalBinding: true,
+            }),
+        })).rejects.toThrow('Sandbox is only supported on macOS and Linux');
+
+        expect(mockInitializeSandbox).not.toHaveBeenCalled();
+        expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it('should continue without sandbox when fallback is explicitly enabled', async () => {
+        mockInitializeSandbox.mockRejectedValue(new Error('sandbox failed'));
+
+        await claudeLocal({
+            abort: new AbortController().signal,
+            sessionId: null,
+            path: '/tmp',
+            onSessionFound,
+            claudeArgs: [],
+            sandboxConfig: SandboxConfigSchema.parse({
+                enabled: true,
+                sessionIsolation: 'workspace',
+                customWritePaths: [],
+                denyReadPaths: ['~/.ssh'],
+                extraWritePaths: ['/tmp'],
+                denyWritePaths: ['.env'],
+                networkMode: 'allowed',
+                allowedDomains: [],
+                deniedDomains: [],
+                allowLocalBinding: true,
+                allowSandboxFallback: true,
+            }),
         });
 
         expect(mockWrapCommand).not.toHaveBeenCalled();

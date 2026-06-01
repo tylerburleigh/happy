@@ -6,11 +6,13 @@
  */
 
 import chalk from 'chalk'
-import { appendFileSync } from 'fs'
+import { appendFileSync, chmodSync } from 'fs'
 import { inspect } from 'node:util'
 import { configuration } from '@/configuration'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { PRIVATE_FILE_MODE } from '@/utils/privateFiles'
+import { redactSecrets } from '@/utils/redactSecrets'
 // Note: readDaemonState is imported lazily inside listDaemonLogFiles() to avoid
 // circular dependency: logger.ts ↔ persistence.ts
 
@@ -46,7 +48,7 @@ function getSessionLogPath(): string {
   return join(configuration.logsDir, filename)
 }
 
-class Logger {
+export class Logger {
   private dangerouslyUnencryptedServerLoggingUrl: string | undefined
 
   constructor(
@@ -183,15 +185,17 @@ class Logger {
     if (!this.dangerouslyUnencryptedServerLoggingUrl) return
     
     try {
+      const redactedMessage = redactSecrets(`${message} ${args.map(a =>
+        typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+      ).join(' ')}`);
+
       await fetch(this.dangerouslyUnencryptedServerLoggingUrl + '/logs-combined-from-cli-and-mobile-for-simple-ai-debugging', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           timestamp: new Date().toISOString(),
           level,
-          message: `${message} ${args.map(a => 
-            typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
-          ).join(' ')}`,
+          message: redactedMessage,
           source: 'cli',
           platform: process.platform
         })
@@ -202,9 +206,10 @@ class Logger {
   }
 
   private logToFile(prefix: string, message: string, ...args: unknown[]): void {
-    const logLine = `${prefix} ${message} ${args.map(arg =>
+    const rawLogLine = `${prefix} ${message} ${args.map(arg =>
       typeof arg === 'string' ? arg : inspect(arg, { depth: 5, breakLength: 120 })
     ).join(' ')}\n`
+    const logLine = redactSecrets(rawLogLine)
     
     // Send to remote server if configured
     if (this.dangerouslyUnencryptedServerLoggingUrl) {
@@ -221,7 +226,10 @@ class Logger {
     
     // Handle async file path
     try {
-      appendFileSync(this.logFilePath, logLine)
+      appendFileSync(this.logFilePath, logLine, { encoding: 'utf-8', mode: PRIVATE_FILE_MODE })
+      try {
+        chmodSync(this.logFilePath, PRIVATE_FILE_MODE)
+      } catch { }
     } catch (appendError) {
       if (process.env.DEBUG) {
         console.error('[DEV MODE ONLY THROWING] Failed to append to log file:', appendError)

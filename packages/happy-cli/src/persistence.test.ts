@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SandboxConfigSchema } from './persistence';
+import {
+    DEFAULT_SANDBOX_DENY_READ_PATHS,
+    DEFAULT_SANDBOX_DENY_WRITE_PATHS,
+    SandboxConfigSchema,
+} from './persistence';
 
 describe('SandboxConfigSchema', () => {
     it('applies defaults when values are omitted', () => {
@@ -9,13 +13,18 @@ describe('SandboxConfigSchema', () => {
             enabled: false,
             sessionIsolation: 'workspace',
             customWritePaths: [],
-            denyReadPaths: ['~/.ssh', '~/.aws', '~/.gnupg'],
+            denyReadPaths: DEFAULT_SANDBOX_DENY_READ_PATHS,
             extraWritePaths: ['/tmp'],
-            denyWritePaths: ['.env'],
+            denyWritePaths: DEFAULT_SANDBOX_DENY_WRITE_PATHS,
             networkMode: 'allowed',
             allowedDomains: [],
             deniedDomains: [],
             allowLocalBinding: true,
+            allowSandboxFallback: false,
+            agentHomeMode: 'isolated',
+            isolatedCodexHome: '~/.happy/agent-homes/codex',
+            isolatedClaudeConfigDir: '~/.happy/agent-homes/claude',
+            envPassthrough: [],
         });
     });
 
@@ -32,6 +41,9 @@ describe('SandboxConfigSchema', () => {
             allowedDomains: ['api.openai.com', '*.github.com'],
             deniedDomains: ['tracking.example.com'],
             allowLocalBinding: false,
+            allowSandboxFallback: true,
+            agentHomeMode: 'shared',
+            envPassthrough: ['OPENAI_API_KEY'],
         });
 
         expect(parsed.enabled).toBe(true);
@@ -40,6 +52,9 @@ describe('SandboxConfigSchema', () => {
         expect(parsed.networkMode).toBe('custom');
         expect(parsed.allowedDomains).toEqual(['api.openai.com', '*.github.com']);
         expect(parsed.allowLocalBinding).toBe(false);
+        expect(parsed.allowSandboxFallback).toBe(true);
+        expect(parsed.agentHomeMode).toBe('shared');
+        expect(parsed.envPassthrough).toEqual(['OPENAI_API_KEY']);
     });
 
     it('rejects invalid enum values', () => {

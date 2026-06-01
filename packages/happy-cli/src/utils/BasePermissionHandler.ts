@@ -138,6 +138,25 @@ export abstract class BasePermissionHandler {
     }
 
     /**
+     * Force a user-visible permission request, bypassing provider-specific
+     * auto-approval rules such as yolo mode or always-approved utility tools.
+     */
+    requestUserApproval(toolCallId: string, toolName: string, input: unknown): Promise<PermissionResult> {
+        return new Promise<PermissionResult>((resolve, reject) => {
+            this.pendingRequests.set(toolCallId, {
+                resolve,
+                reject,
+                toolName,
+                input
+            });
+
+            this.addPendingRequestToState(toolCallId, toolName, input);
+
+            logger.debug(`${this.getLogPrefix()} Permission request sent for tool: ${toolName} (${toolCallId})`);
+        });
+    }
+
+    /**
      * Abort all pending permission requests.
      * Unlike reset(), this resolves (not rejects) pending promises with { decision: 'abort' },
      * causing the approval response to send 'cancel' to the provider. This is used when the

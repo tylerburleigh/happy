@@ -46,6 +46,7 @@ export const MetadataSchema = z.object({
     startedBy: z.enum(['daemon', 'terminal']).optional(),
     flavor: z.string().nullish(), // Session flavor/variant identifier
     sandbox: z.any().nullish(), // Sandbox config metadata from CLI (or null when disabled)
+    sandboxStatus: z.enum(['disabled', 'configured', 'enforced', 'unsupported', 'unavailable']).optional(),
     dangerouslySkipPermissions: z.boolean().nullish(), // Claude --dangerously-skip-permissions mode (or null when unknown)
     lifecycleState: z.string().optional(),
     lifecycleStateSince: z.number().optional(),

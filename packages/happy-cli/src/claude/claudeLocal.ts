@@ -12,6 +12,9 @@ import { projectPath } from "@/projectPath";
 import { systemPrompt } from "./utils/systemPrompt";
 import type { SandboxConfig } from "@/persistence";
 import { initializeSandbox, wrapCommand } from "@/sandbox/manager";
+import { buildSandboxedProcessEnv } from "@/sandbox/env";
+import { isSandboxRuntimePlatformSupported, supportedSandboxPlatformSummary } from "@/sandbox/platform";
+import type { SandboxStatus } from "@/utils/createSessionMetadata";
 
 /**
  * Error thrown when the Claude process exits with a non-zero exit code.
@@ -47,6 +50,7 @@ export async function claudeLocal(opts: {
     /** Path to temporary settings file with SessionStart hook (optional - for session tracking) */
     hookSettingsPath?: string,
     sandboxConfig?: SandboxConfig,
+    onSandboxStatusChange?: (status: SandboxStatus) => void,
 }) {
 
     // Ensure project directory exists
@@ -257,13 +261,9 @@ export async function claudeLocal(opts: {
             // Prepare environment variables
             // Note: Local mode uses global Claude installation with --session-id flag
             // Launcher only intercepts fetch for thinking state tracking
-            const env = {
+            let env = {
                 ...process.env,
                 ...opts.claudeEnvVars
-            }
-
-            if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
-                ensureLocalProxyBypass(env);
             }
 
             logger.debug(`[ClaudeLocal] Spawning launcher: ${claudeCliPath}`);
@@ -276,11 +276,18 @@ export async function claudeLocal(opts: {
                 let spawnWithShell = false;
 
                 if (opts.sandboxConfig?.enabled) {
-                    if (process.platform === 'win32') {
-                        logger.warn('[ClaudeLocal] Sandbox is not supported on Windows; continuing without sandbox.');
+                    if (!isSandboxRuntimePlatformSupported()) {
+                        const message = `[ClaudeLocal] Sandbox is only supported on ${supportedSandboxPlatformSummary()} by the sandbox runtime.`;
+                        if (opts.sandboxConfig.allowSandboxFallback) {
+                            logger.warn(`${message} Continuing without sandbox because allowSandboxFallback is enabled.`);
+                            opts.onSandboxStatusChange?.('unavailable');
+                        } else {
+                            throw new Error(`${message} Re-run with --no-sandbox or set allowSandboxFallback=true if you intentionally want an unsandboxed session.`);
+                        }
                     } else {
                         try {
                             cleanupSandbox = await initializeSandbox(opts.sandboxConfig, opts.path);
+                            env = buildSandboxedProcessEnv(process.env, opts.sandboxConfig, opts.path, opts.claudeEnvVars);
 
                             if (!spawnArgs.includes('--dangerously-skip-permissions')) {
                                 spawnArgs = [...spawnArgs, '--dangerously-skip-permissions'];
@@ -297,14 +304,32 @@ export async function claudeLocal(opts: {
                             logger.info(
                                 `[ClaudeLocal] Sandbox enabled: workspace=${opts.sandboxConfig.workspaceRoot ?? opts.path}, network=${opts.sandboxConfig.networkMode}`,
                             );
+                            opts.onSandboxStatusChange?.('enforced');
                         } catch (error) {
-                            logger.warn('[ClaudeLocal] Failed to initialize sandbox; continuing without sandbox.', error);
-                            cleanupSandbox = null;
-                            spawnCommand = null;
-                            spawnWithShell = false;
-                            spawnArgs = [claudeCliPath, ...args];
+                            if (opts.sandboxConfig.allowSandboxFallback) {
+                                logger.warn('[ClaudeLocal] Failed to initialize sandbox; continuing without sandbox because allowSandboxFallback is enabled.', error);
+                                if (cleanupSandbox) {
+                                    try { await cleanupSandbox(); } catch { }
+                                }
+                                cleanupSandbox = null;
+                                spawnCommand = null;
+                                spawnWithShell = false;
+                                spawnArgs = [claudeCliPath, ...args];
+                                opts.onSandboxStatusChange?.('unavailable');
+                            } else {
+                                if (cleanupSandbox) {
+                                    try { await cleanupSandbox(); } catch { }
+                                }
+                                throw error;
+                            }
                         }
                     }
+                } else {
+                    opts.onSandboxStatusChange?.('disabled');
+                }
+
+                if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+                    ensureLocalProxyBypass(env);
                 }
 
                 // Use cross-spawn so `node` resolves to `node.exe` on Windows

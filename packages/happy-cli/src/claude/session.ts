@@ -4,6 +4,7 @@ import { EnhancedMode } from "./loop";
 import { logger } from "@/ui/logger";
 import type { JsRuntime } from "./runClaude";
 import type { SandboxConfig } from "@/persistence";
+import type { SandboxStatus } from "@/utils/createSessionMetadata";
 
 export class Session {
     readonly path: string;
@@ -16,6 +17,7 @@ export class Session {
     readonly mcpServers: Record<string, any>;
     readonly allowedTools?: string[];
     readonly sandboxConfig?: SandboxConfig;
+    readonly onSandboxStatusChange?: (status: SandboxStatus) => void;
     readonly _onModeChange: (mode: 'local' | 'remote') => void;
     readonly _onAbort?: () => void;
     /** Path to temporary settings file with SessionStart hook (required for session tracking) */
@@ -47,6 +49,7 @@ export class Session {
         onAbort?: () => void,
         allowedTools?: string[],
         sandboxConfig?: SandboxConfig,
+        onSandboxStatusChange?: (status: SandboxStatus) => void,
         /** Path to temporary settings file with SessionStart hook (required for session tracking) */
         hookSettingsPath: string,
         /** JavaScript runtime to use for spawning Claude Code (default: 'node') */
@@ -63,6 +66,7 @@ export class Session {
         this.mcpServers = opts.mcpServers;
         this.allowedTools = opts.allowedTools;
         this.sandboxConfig = opts.sandboxConfig;
+        this.onSandboxStatusChange = opts.onSandboxStatusChange;
         this._onModeChange = opts.onModeChange;
         this._onAbort = opts.onAbort;
         this.hookSettingsPath = opts.hookSettingsPath;

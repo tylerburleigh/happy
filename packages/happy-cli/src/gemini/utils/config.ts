@@ -5,12 +5,13 @@
  * including API keys, tokens, and model settings.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { logger } from '@/ui/logger';
 import { GEMINI_MODEL_ENV, DEFAULT_GEMINI_MODEL } from '../constants';
+import { ensurePrivateDirSync, writePrivateFileSync } from '@/utils/privateFiles';
 
 /**
  * Result of reading Gemini local configuration
@@ -162,10 +163,7 @@ export function saveGeminiModelToConfig(model: string): void {
     const configDir = join(homedir(), '.gemini');
     const configPath = join(configDir, 'config.json');
     
-    // Create directory if it doesn't exist
-    if (!existsSync(configDir)) {
-      mkdirSync(configDir, { recursive: true });
-    }
+    ensurePrivateDirSync(configDir);
     
     // Read existing config or create new one
     let config: any = {};
@@ -182,7 +180,7 @@ export function saveGeminiModelToConfig(model: string): void {
     config.model = model;
     
     // Write config back
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    writePrivateFileSync(configPath, JSON.stringify(config, null, 2));
     logger.debug(`[Gemini] Saved model "${model}" to ${configPath}`);
   } catch (error) {
     logger.debug(`[Gemini] Failed to save model to config:`, error);
@@ -202,9 +200,7 @@ export function saveGoogleCloudProjectToConfig(projectId: string, email?: string
     const configPath = join(configDir, 'config.json');
     
     // Create directory if it doesn't exist
-    if (!existsSync(configDir)) {
-      mkdirSync(configDir, { recursive: true });
-    }
+    ensurePrivateDirSync(configDir);
     
     // Read existing config or create new one
     let config: Record<string, unknown> = {};
@@ -225,7 +221,7 @@ export function saveGoogleCloudProjectToConfig(projectId: string, email?: string
     }
     
     // Write config back
-    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    writePrivateFileSync(configPath, JSON.stringify(config, null, 2));
     logger.debug(`[Gemini] Saved Google Cloud Project "${projectId}"${email ? ` for ${email}` : ''} to ${configPath}`);
   } catch (error) {
     logger.debug(`[Gemini] Failed to save Google Cloud Project to config:`, error);
@@ -265,4 +261,3 @@ export function getGeminiModelSource(
     return 'default';
   }
 }
-

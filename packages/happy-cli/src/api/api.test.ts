@@ -27,8 +27,8 @@ vi.mock('@/ui/logger', () => ({
 vi.mock('./encryption', () => ({
     decodeBase64: vi.fn((data: string) => data),
     encodeBase64: vi.fn((data: any) => data),
-    decrypt: vi.fn((data: any) => data),
-    encrypt: vi.fn((data: any) => data)
+    decrypt: vi.fn((_key: any, _variant: any, data: any) => data),
+    encrypt: vi.fn((_key: any, _variant: any, data: any) => data)
 }));
 
 // Mock configuration
@@ -82,6 +82,40 @@ describe('Api server error handling', () => {
     });
 
     describe('getOrCreateSession', () => {
+        it('should redact secret-like values before sending session metadata', async () => {
+            mockPost.mockImplementation(async (_url, body) => ({
+                data: {
+                    session: {
+                        id: 'session-redacted',
+                        seq: 1,
+                        metadata: body.metadata,
+                        metadataVersion: 1,
+                        agentState: null,
+                        agentStateVersion: 0,
+                    }
+                }
+            }));
+
+            const result = await api.getOrCreateSession({
+                tag: 'test-tag',
+                metadata: {
+                    ...testMetadata,
+                    summary: {
+                        text: 'OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456',
+                        updatedAt: 1,
+                    },
+                    name: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456',
+                },
+                state: null
+            });
+
+            const requestBody = mockPost.mock.calls[0][1];
+            expect(requestBody.metadata.summary.text).toBe('OPENAI_API_KEY=[REDACTED]');
+            expect(requestBody.metadata.name).toBe('Authorization: Bearer [REDACTED]');
+            expect(result?.metadata.summary?.text).toBe('OPENAI_API_KEY=[REDACTED]');
+            expect(result?.metadata.name).toBe('Authorization: Bearer [REDACTED]');
+        });
+
         it('should return null when Happy server is unreachable (ECONNREFUSED)', async () => {
             const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 

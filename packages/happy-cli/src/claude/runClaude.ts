@@ -32,6 +32,7 @@ import { getProjectPath } from './utils/path';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RawJSONLinesSchema, type RawJSONLines } from './types';
+import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
 
 /** JavaScript runtime to use for spawning Claude Code */
 export type JsRuntime = 'node' | 'bun'
@@ -81,16 +82,18 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     // Get machine ID from settings (should already be set up)
     const settings = await readSettings();
     let machineId = settings?.machineId
-    const sandboxConfig = options.noSandbox ? undefined : settings?.sandboxConfig;
+    const sandboxConfig = options.noSandbox ? undefined : resolveSandboxConfig(settings?.sandboxConfig, workingDirectory);
     const sandboxEnabled = Boolean(sandboxConfig?.enabled);
+    const sandboxCanFallback = Boolean(sandboxConfig?.enabled && sandboxConfig.allowSandboxFallback);
+    const sandboxPermissionPolicyEnabled = sandboxEnabled && !sandboxCanFallback;
     const initialPermissionMode = applySandboxPermissionPolicy(
         resolveInitialClaudePermissionMode(options.permissionMode ?? DEFAULT_CLAUDE_PERMISSION_MODE, options.claudeArgs),
-        sandboxEnabled,
+        sandboxPermissionPolicyEnabled,
     );
     const dangerouslySkipPermissions =
         initialPermissionMode === 'bypassPermissions' ||
         initialPermissionMode === 'yolo' ||
-        sandboxEnabled ||
+        sandboxPermissionPolicyEnabled ||
         Boolean(options.claudeArgs?.includes('--dangerously-skip-permissions'));
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on https://github.com/slopus/happy-cli/issues`);
@@ -126,6 +129,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         lifecycleStateSince: Date.now(),
         flavor: 'claude',
         sandbox: sandboxConfig?.enabled ? sandboxConfig : null,
+        sandboxStatus: sandboxConfig?.enabled ? 'configured' : 'disabled',
         dangerouslySkipPermissions,
         ...(forkedFromSessionId ? { parentSessionId: forkedFromSessionId } : {}),
         ...(forkedFromMessageId ? { forkedFromMessageId } : {}),
@@ -193,6 +197,10 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
                 mcpServers: {},
                 allowedTools: [],
                 sandboxConfig,
+                onSandboxStatusChange: (status) => {
+                    metadata.sandbox = sandboxConfig?.enabled ? sandboxConfig : null;
+                    metadata.sandboxStatus = status;
+                },
             });
         } finally {
             reconnection.cancel();
@@ -383,7 +391,9 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     logger.debug(`[START] Hook server started on port ${hookServer.port}`);
 
     // Generate hook settings file for Claude
-    const hookSettingsPath = generateHookSettingsFile(hookServer.port);
+    const hookSettingsPath = generateHookSettingsFile(hookServer.port, {
+        enableSandboxGuards: sandboxEnabled,
+    });
     logger.debug(`[START] Generated hook settings file: ${hookSettingsPath}`);
 
     // Print log file path
@@ -479,7 +489,7 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         // Resolve permission mode from meta - pass through as-is, mapping happens at SDK boundary
         let messagePermissionMode: PermissionMode | undefined = currentPermissionMode;
         if (message.meta?.permissionMode) {
-            messagePermissionMode = applySandboxPermissionPolicy(message.meta.permissionMode, sandboxEnabled);
+            messagePermissionMode = applySandboxPermissionPolicy(message.meta.permissionMode, sandboxPermissionPolicyEnabled);
             currentPermissionMode = messagePermissionMode;
             logger.debug(`[loop] Permission mode updated from user message to: ${currentPermissionMode}`);
         } else {
@@ -784,6 +794,16 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
             currentSession = sessionInstance;
         },
         onAbort: resetCurrentModeDefaults,
+        onSandboxStatusChange: (status) => {
+            session.updateMetadata((currentMetadata) => ({
+                ...currentMetadata,
+                sandbox: sandboxConfig?.enabled ? sandboxConfig : null,
+                sandboxStatus: status,
+                dangerouslySkipPermissions: status === 'enforced'
+                    ? true
+                    : currentMetadata.dangerouslySkipPermissions,
+            }));
+        },
         mcpServers: {
             'happy': {
                 type: 'http' as const,

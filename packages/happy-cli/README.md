@@ -123,12 +123,35 @@ happy connect status
 ### Sandbox (experimental)
 
 Happy can run agents inside an OS-level sandbox to restrict file system and network access.
+The sandbox runtime supports macOS and Linux; Windows and other platforms fail closed
+unless `allowSandboxFallback` is explicitly enabled.
+When the sandbox is enabled, Happy now fails closed if the sandbox cannot start,
+filters globally exported secret-looking environment variables from agent
+subprocesses, and uses isolated Codex/Claude homes by default.
 
 ```bash
 happy sandbox configure
 happy sandbox status
 happy sandbox disable
 ```
+
+Projects can add `.happy/sandbox.json` to tighten the global `~/.happy/settings.json`
+policy. Project policy can add read/write denies, disable localhost binding,
+require stricter session isolation, or narrow a custom network allowlist.
+
+Localhost is controlled by `allowLocalBinding`. Happy uses localhost for helper
+servers and callbacks, including daemon control, direct HTTP proxying, MCP/hook
+helpers, OAuth callbacks, and `happy server` on `127.0.0.1:3005` by default.
+Most helper ports are allocated dynamically, and the current sandbox runtime
+exposes localhost binding as a boolean rather than a per-port allowlist. Keep
+`allowLocalBinding` disabled unless a session needs local callbacks or proxies.
+
+For forks and local hardening branches, keep personal agent configuration out of
+commits. Do not commit `.codex/config.toml`, `.mcp.json`, `~/.happy/settings.json`,
+`~/.happy/access.key`, `~/.happy/logs`, copied agent homes, or local hook temp
+files. Project `.happy/sandbox.json` policy files are intended to be commit-safe
+when they contain only policy, never tokens or personal paths that should stay
+private.
 
 ### Building from source
 

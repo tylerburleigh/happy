@@ -34,6 +34,7 @@ import { extractNoSandboxFlag } from './utils/sandboxFlags'
 import { handleResumeCommand } from '@/resume/handleResumeCommand'
 import { ensureDaemonRunning } from './daemon/ensureDaemonRunning'
 import { handleCodexCommand } from './commands/codexCommand'
+import { ensurePrivateDirSync, writePrivateFileSync } from './utils/privateFiles'
 
 
 (async () => {
@@ -164,7 +165,7 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       }
       
       try {
-        const { existsSync, readFileSync, writeFileSync, mkdirSync } = require('fs');
+        const { existsSync, readFileSync } = require('fs');
         const { join } = require('path');
         const { homedir } = require('os');
         
@@ -172,9 +173,7 @@ Conversation history is preserved on the server, but in-flight tool calls are in
         const configPath = join(configDir, 'config.json');
         
         // Create directory if it doesn't exist
-        if (!existsSync(configDir)) {
-          mkdirSync(configDir, { recursive: true });
-        }
+        ensurePrivateDirSync(configDir);
         
         // Read existing config or create new one
         let config: any = {};
@@ -191,7 +190,7 @@ Conversation history is preserved on the server, but in-flight tool calls are in
         config.model = modelName;
         
         // Write config back
-        writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        writePrivateFileSync(configPath, JSON.stringify(config, null, 2));
         console.log(`✓ Model set to: ${modelName}`);
         console.log(`  Config saved to: ${configPath}`);
         console.log(`  This model will be used in future sessions.`);

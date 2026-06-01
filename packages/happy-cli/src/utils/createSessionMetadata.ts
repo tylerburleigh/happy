@@ -20,6 +20,7 @@ import packageJson from '../../package.json';
  * Backend flavor identifier for session metadata.
  */
 export type BackendFlavor = 'claude' | 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'acp';
+export type SandboxStatus = 'disabled' | 'configured' | 'enforced' | 'unsupported' | 'unavailable';
 
 /**
  * Options for creating session metadata.
@@ -33,6 +34,8 @@ export interface CreateSessionMetadataOptions {
     startedBy?: 'daemon' | 'terminal';
     /** Active sandbox config for the session, or undefined when not used */
     sandbox?: SandboxConfig;
+    /** Actual sandbox enforcement state. Configured is not equivalent to enforced. */
+    sandboxStatus?: SandboxStatus;
     /** Whether the backend runs with "dangerously skip permissions" behavior */
     dangerouslySkipPermissions?: boolean;
 }
@@ -72,6 +75,9 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         controlledByUser: false,
     };
 
+    const sandboxStatus = opts.sandboxStatus
+        ?? (opts.sandbox?.enabled ? 'configured' : 'disabled');
+
     const metadata: Metadata = {
         path: process.cwd(),
         host: os.hostname(),
@@ -89,6 +95,7 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         lifecycleStateSince: Date.now(),
         flavor: opts.flavor,
         sandbox: opts.sandbox?.enabled ? opts.sandbox : null,
+        sandboxStatus,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions ?? null,
     };
 

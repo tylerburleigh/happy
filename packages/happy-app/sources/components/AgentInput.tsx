@@ -573,6 +573,9 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const availableModels = props.availableModels ?? [];
     const availableEffortLevels = props.availableEffortLevels ?? [];
     const isSandboxEnabled = React.useMemo(() => {
+        if (props.metadata?.sandboxStatus) {
+            return props.metadata.sandboxStatus === 'enforced';
+        }
         const sandbox = props.metadata?.sandbox as unknown;
         if (!sandbox) {
             return false;

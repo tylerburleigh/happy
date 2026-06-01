@@ -30,6 +30,7 @@ import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler'
 import { connectionState } from '@/utils/serverConnectionErrors';
 import { setupOfflineReconnection } from '@/utils/setupOfflineReconnection';
 import type { ApiSessionClient } from '@/api/apiSession';
+import { buildSandboxedProcessEnv } from '@/sandbox/env';
 
 import { createGeminiBackend } from '@/agent/factories/gemini';
 import type { AgentBackend, AgentMessage } from '@/agent';
@@ -51,6 +52,7 @@ import {
   formatOptionsXml,
 } from '@/gemini/utils/optionsParser';
 import { ConversationHistory } from '@/gemini/utils/conversationHistory';
+import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
 
 
 /**
@@ -79,7 +81,10 @@ export async function runGemini(opts: {
 
   const settings = await readSettings();
   const machineId = settings?.machineId;
-  const sandboxConfig = settings?.sandboxConfig;
+  const sandboxConfig = resolveSandboxConfig(settings?.sandboxConfig, process.cwd());
+  const sandboxedAgentEnv = sandboxConfig?.enabled
+    ? buildSandboxedProcessEnv(process.env, sandboxConfig, process.cwd()) as Record<string, string>
+    : undefined;
   if (!machineId) {
     console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on https://github.com/slopus/happy-cli/issues`);
     process.exit(1);
@@ -130,6 +135,7 @@ export async function runGemini(opts: {
     machineId,
     startedBy: opts.startedBy,
     sandbox: sandboxConfig,
+    sandboxStatus: sandboxConfig?.enabled ? 'unsupported' : 'disabled',
   });
   const response = await api.getOrCreateSession({ tag: sessionTag, metadata, state });
 
@@ -954,6 +960,8 @@ export async function runGemini(opts: {
         const modelToUse = message.mode?.model === undefined ? undefined : (message.mode.model || null);
         const backendResult = createGeminiBackend({
           cwd: process.cwd(),
+          env: sandboxedAgentEnv,
+          replaceEnv: Boolean(sandboxedAgentEnv),
           mcpServers,
           permissionHandler,
           cloudToken,
@@ -1007,6 +1015,8 @@ export async function runGemini(opts: {
             const modelToUse = message.mode?.model === undefined ? undefined : (message.mode.model || null);
             const backendResult = createGeminiBackend({
               cwd: process.cwd(),
+              env: sandboxedAgentEnv,
+              replaceEnv: Boolean(sandboxedAgentEnv),
               mcpServers,
               permissionHandler,
               cloudToken,

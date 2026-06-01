@@ -48,6 +48,9 @@ export interface GeminiBackendOptions extends AgentFactoryOptions {
   
   /** Optional permission handler for tool approval */
   permissionHandler?: AcpPermissionHandler;
+
+  /** Use env exactly instead of overlaying it on process.env. */
+  replaceEnv?: boolean;
 }
 
 /**
@@ -141,6 +144,7 @@ export function createGeminiBackend(options: GeminiBackendOptions): GeminiBacken
       NODE_ENV: 'production',
       DEBUG: '',
     },
+    replaceEnv: options.replaceEnv === true,
     mcpServers: options.mcpServers,
     permissionHandler: options.permissionHandler,
     transportHandler: geminiTransport,
@@ -184,4 +188,3 @@ export function registerGeminiAgent(): void {
   agentRegistry.register('gemini', (opts) => createGeminiBackend(opts).backend);
   logger.debug('[Gemini] Registered with agent registry');
 }
-

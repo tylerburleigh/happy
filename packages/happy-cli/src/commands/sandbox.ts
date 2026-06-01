@@ -3,6 +3,8 @@ import inquirer from 'inquirer';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
+    DEFAULT_SANDBOX_DENY_READ_PATHS,
+    DEFAULT_SANDBOX_DENY_WRITE_PATHS,
     SandboxConfigSchema,
     readSettings,
     updateSettings,
@@ -10,7 +12,6 @@ import {
 } from '@/persistence';
 
 const DEFAULT_WORKSPACE_ROOT = '~/Workspace';
-const DEFAULT_DENY_READ_PATHS = ['~/.ssh', '~/.aws', '~/.gnupg'];
 
 type ScopeMode = 'workspace' | 'project';
 
@@ -78,10 +79,10 @@ export async function handleSandboxConfigure(): Promise<void> {
             type: 'list',
             name: 'scopeMode',
             message: 'How should file access be scoped?',
-            default: 'workspace',
+            default: 'project',
             choices: [
+                { name: 'per-project - Only the current project/worktree', value: 'project' },
                 { name: 'workspace - Full workspace root directory', value: 'workspace' },
-                { name: 'per-project - Only current project directory', value: 'project' },
             ],
         },
         {
@@ -119,13 +120,16 @@ export async function handleSandboxConfigure(): Promise<void> {
         workspaceRoot: scopeMode === 'workspace' ? answers.workspaceRoot || workspaceRootDefault : undefined,
         sessionIsolation: scopeMode === 'workspace' ? 'workspace' : 'strict',
         customWritePaths: [],
-        denyReadPaths: DEFAULT_DENY_READ_PATHS,
+        denyReadPaths: DEFAULT_SANDBOX_DENY_READ_PATHS,
         extraWritePaths: ['/tmp'],
-        denyWritePaths: ['.env'],
+        denyWritePaths: DEFAULT_SANDBOX_DENY_WRITE_PATHS,
         networkMode: answers.networkMode,
         allowedDomains: [],
         deniedDomains: [],
         allowLocalBinding: Boolean(answers.allowLocalBinding),
+        allowSandboxFallback: false,
+        agentHomeMode: 'isolated',
+        envPassthrough: [],
     });
 
     console.log(chalk.bold('\nSandbox configuration summary:'));
@@ -172,6 +176,12 @@ export async function handleSandboxStatus(): Promise<void> {
     }
     console.log(`Network mode: ${config.networkMode}`);
     console.log(`Allow localhost binding: ${config.allowLocalBinding ? 'yes' : 'no'}`);
+    console.log(`Sandbox failure fallback: ${config.allowSandboxFallback ? 'yes' : 'no'}`);
+    console.log(`Agent homes: ${config.agentHomeMode}`);
+    if (config.agentHomeMode === 'isolated') {
+        console.log(`Codex home: ${config.isolatedCodexHome}`);
+        console.log(`Claude config dir: ${config.isolatedClaudeConfigDir}`);
+    }
 }
 
 export async function handleSandboxDisable(): Promise<void> {

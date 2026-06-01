@@ -5,10 +5,11 @@
  * Environment files should be loaded using Node's --env-file flag
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import packageJson from '../package.json'
+import { ensurePrivateDirSync } from '@/utils/privateFiles'
 
 class Configuration {
   public readonly serverUrl: string
@@ -73,13 +74,8 @@ class Configuration {
       console.log('\x1b[33m🔧 DEV MODE\x1b[0m - Data: ' + this.happyHomeDir)
     }
 
-    if (!existsSync(this.happyHomeDir)) {
-      mkdirSync(this.happyHomeDir, { recursive: true })
-    }
-    // Ensure directories exist
-    if (!existsSync(this.logsDir)) {
-      mkdirSync(this.logsDir, { recursive: true })
-    }
+    ensurePrivateDirSync(this.happyHomeDir)
+    ensurePrivateDirSync(this.logsDir)
   }
 }
 

@@ -63,9 +63,9 @@ function StatusDot({ color, isPulsing, size = 8 }: { color: string; isPulsing?: 
     );
 }
 
-function formatSandboxMetadata(sandbox: unknown, homeDir?: string): string {
+function formatSandboxMetadata(sandbox: unknown, homeDir?: string, status?: string | null): string {
     if (sandbox === null || sandbox === undefined) {
-        return 'Disabled';
+        return status && status !== 'disabled' ? `Status=${status}` : 'Disabled';
     }
 
     if (typeof sandbox === 'string') {
@@ -81,7 +81,7 @@ function formatSandboxMetadata(sandbox: unknown, homeDir?: string): string {
         return 'Disabled';
     }
 
-    const parts: string[] = ['Enabled'];
+    const parts: string[] = [status ? `Status=${status}` : 'Configured'];
     const isolation = typeof value.sessionIsolation === 'string' ? value.sessionIsolation : undefined;
     const networkMode = typeof value.networkMode === 'string' ? value.networkMode : undefined;
     const workspaceRoot = typeof value.workspaceRoot === 'string' ? value.workspaceRoot : undefined;
@@ -104,6 +104,7 @@ function formatDangerouslySkipPermissionsMetadata(
     flavor: string | null | undefined,
     permissionMode: Session['permissionMode'],
     sandbox: unknown,
+    sandboxStatus?: string | null,
 ): string {
     if (typeof value === 'boolean') {
         return value ? 'Enabled' : 'Disabled';
@@ -113,7 +114,7 @@ function formatDangerouslySkipPermissionsMetadata(
         return 'Enabled';
     }
 
-    if (flavor === 'claude' && sandbox && typeof sandbox === 'object') {
+    if (flavor === 'claude' && sandboxStatus === 'enforced' && sandbox && typeof sandbox === 'object') {
         const sandboxValue = sandbox as Record<string, unknown>;
         if (sandboxValue.enabled === true) {
             return 'Enabled';
@@ -450,7 +451,11 @@ function SessionInfoContent({ session }: { session: Session }) {
                         />
                         <Item
                             title="Sandbox"
-                            subtitle={formatSandboxMetadata(session.metadata.sandbox, session.metadata.homeDir)}
+                            subtitle={formatSandboxMetadata(
+                                session.metadata.sandbox,
+                                session.metadata.homeDir,
+                                session.metadata.sandboxStatus,
+                            )}
                             icon={<Ionicons name="shield-outline" size={29} color="#5856D6" />}
                             showChevron={false}
                         />
@@ -461,6 +466,7 @@ function SessionInfoContent({ session }: { session: Session }) {
                                 session.metadata.flavor,
                                 session.permissionMode,
                                 session.metadata.sandbox,
+                                session.metadata.sandboxStatus,
                             )}
                             icon={<Ionicons name="warning-outline" size={29} color="#5856D6" />}
                             showChevron={false}

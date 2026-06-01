@@ -3,7 +3,8 @@
  * Provides endpoints for listing sessions, stopping sessions, and daemon shutdown
  */
 
-import fastify, { FastifyInstance } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
+import fastify from 'fastify';
 import { z } from 'zod';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { logger } from '@/ui/logger';
@@ -12,28 +13,45 @@ import { decodeBase64 } from '@/api/encryption';
 import { TrackedSession, SessionEncryptionData } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 
-export function startDaemonControlServer({
-  getChildren,
-  stopSession,
-  spawnSession,
-  requestShutdown,
-  onHappySessionWebhook
-}: {
+const DAEMON_CONTROL_HEADER = 'x-happy-daemon-control';
+
+type DaemonControlServerOptions = {
+  controlToken: string;
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => boolean;
   spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>;
   requestShutdown: () => void;
   onHappySessionWebhook: (sessionId: string, metadata: Metadata, encryption?: SessionEncryptionData) => void;
-}): Promise<{ port: number; stop: () => Promise<void> }> {
-  return new Promise((resolve) => {
-    const app = fastify({
-      logger: false // We use our own logger
-    });
+};
 
-    // Set up Zod type provider
-    app.setValidatorCompiler(validatorCompiler);
-    app.setSerializerCompiler(serializerCompiler);
-    const typed = app.withTypeProvider<ZodTypeProvider>();
+export function createDaemonControlServer({
+  controlToken,
+  getChildren,
+  stopSession,
+  spawnSession,
+  requestShutdown,
+  onHappySessionWebhook
+}: DaemonControlServerOptions) {
+  const app = fastify({
+    logger: false // We use our own logger
+  });
+
+  // Set up Zod type provider
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+  const typed = app.withTypeProvider<ZodTypeProvider>();
+
+  typed.addHook('preHandler', async (request, reply) => {
+    if (!isValidBearerToken(request.headers.authorization, controlToken)) {
+      logger.debug(`[CONTROL SERVER] Rejected unauthorized request: ${request.method} ${request.url}`);
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
+    if (request.headers[DAEMON_CONTROL_HEADER] !== 'true') {
+      logger.debug(`[CONTROL SERVER] Rejected request missing daemon control header: ${request.method} ${request.url}`);
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+  });
 
     // Session reports itself after creation
     typed.post('/session-started', {
@@ -211,6 +229,13 @@ export function startDaemonControlServer({
       return { status: 'stopping' };
     });
 
+  return app;
+}
+
+export function startDaemonControlServer(options: DaemonControlServerOptions): Promise<{ port: number; stop: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const app = createDaemonControlServer(options);
+
     app.listen({ port: 0, host: '127.0.0.1' }, (err, address) => {
       if (err) {
         logger.debug('[CONTROL SERVER] Failed to start:', err);
@@ -230,4 +255,17 @@ export function startDaemonControlServer({
       });
     });
   });
+}
+
+function isValidBearerToken(authHeader: string | undefined, controlToken: string): boolean {
+  const prefix = 'Bearer ';
+  if (!authHeader?.startsWith(prefix)) {
+    return false;
+  }
+
+  const providedToken = authHeader.slice(prefix.length);
+  const providedBuffer = Buffer.from(providedToken);
+  const expectedBuffer = Buffer.from(controlToken);
+
+  return providedBuffer.length === expectedBuffer.length && timingSafeEqual(providedBuffer, expectedBuffer);
 }

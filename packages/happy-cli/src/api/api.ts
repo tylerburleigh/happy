@@ -9,6 +9,7 @@ import { configuration } from '@/configuration';
 import chalk from 'chalk';
 import { Credentials } from '@/persistence';
 import { connectionState, isNetworkError } from '@/utils/serverConnectionErrors';
+import { redactSensitiveData } from '@/utils/redactSecrets';
 
 export class ApiClient {
 
@@ -32,6 +33,7 @@ export class ApiClient {
     metadata: Metadata,
     state: AgentState | null
   }): Promise<Session | null> {
+    const metadata = redactSensitiveData(opts.metadata);
 
     // Resolve encryption key
     let dataEncryptionKey: Uint8Array | null = null;
@@ -61,7 +63,7 @@ export class ApiClient {
         `${configuration.serverUrl}/v1/sessions`,
         {
           tag: opts.tag,
-          metadata: encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.metadata)),
+          metadata: encodeBase64(encrypt(encryptionKey, encryptionVariant, metadata)),
           agentState: opts.state ? encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.state)) : null,
           dataEncryptionKey: dataEncryptionKey ? encodeBase64(dataEncryptionKey) : null,
         },
@@ -80,7 +82,7 @@ export class ApiClient {
       let session: Session = {
         id: raw.id,
         seq: raw.seq,
-        metadata: decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata)),
+        metadata: redactSensitiveData(decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata))),
         metadataVersion: raw.metadataVersion,
         agentState: raw.agentState ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.agentState)) : null,
         agentStateVersion: raw.agentStateVersion,
@@ -146,6 +148,7 @@ export class ApiClient {
     metadata: MachineMetadata,
     daemonState?: DaemonState,
   }): Promise<Machine> {
+    const metadata = redactSensitiveData(opts.metadata);
 
     // Resolve encryption key
     let dataEncryptionKey: Uint8Array | null = null;
@@ -170,7 +173,7 @@ export class ApiClient {
       id: opts.machineId,
       encryptionKey: encryptionKey,
       encryptionVariant: encryptionVariant,
-      metadata: opts.metadata,
+      metadata,
       metadataVersion: 0,
       daemonState: opts.daemonState || null,
       daemonStateVersion: 0,
@@ -182,7 +185,7 @@ export class ApiClient {
         `${configuration.serverUrl}/v1/machines`,
         {
           id: opts.machineId,
-          metadata: encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.metadata)),
+          metadata: encodeBase64(encrypt(encryptionKey, encryptionVariant, metadata)),
           daemonState: opts.daemonState ? encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.daemonState)) : undefined,
           dataEncryptionKey: dataEncryptionKey ? encodeBase64(dataEncryptionKey) : undefined
         },
@@ -205,7 +208,7 @@ export class ApiClient {
         id: raw.id,
         encryptionKey: encryptionKey,
         encryptionVariant: encryptionVariant,
-        metadata: raw.metadata ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata)) : null,
+        metadata: raw.metadata ? redactSensitiveData(decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata))) : null,
         metadataVersion: raw.metadataVersion || 0,
         daemonState: raw.daemonState ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.daemonState)) : null,
         daemonStateVersion: raw.daemonStateVersion || 0,

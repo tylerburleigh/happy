@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { randomBytes } from 'node:crypto';
 import os from 'os';
 import * as tmp from 'tmp';
 import axios from 'axios';
@@ -16,6 +17,7 @@ import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquireDaemonLock, releaseDaemonLock, readPersistedSessions, persistSession } from '@/persistence';
 import type { PersistedSession } from '@/persistence';
+import { PRIVATE_FILE_MODE } from '@/utils/privateFiles';
 
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
@@ -307,7 +309,7 @@ export async function startDaemon(): Promise<void> {
             const codexHomeDir = tmp.dirSync();
 
             // Write the token to the temporary directory
-            await fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token);
+            await fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token, { mode: PRIVATE_FILE_MODE });
 
             // Set the environment variable for Codex
             authEnv.CODEX_HOME = codexHomeDir.name;
@@ -765,7 +767,9 @@ export async function startDaemon(): Promise<void> {
     };
 
     // Start control server
+    const controlToken = randomBytes(32).toString('base64url');
     const { port: controlPort, stop: stopControlServer } = await startDaemonControlServer({
+      controlToken,
       getChildren: getCurrentChildren,
       stopSession,
       spawnSession,
@@ -777,6 +781,7 @@ export async function startDaemon(): Promise<void> {
     const fileState: DaemonLocallyPersistedState = {
       pid: process.pid,
       httpPort: controlPort,
+      controlToken,
       startTime: new Date().toLocaleString(),
       startedWithCliVersion: packageJson.version,
       daemonLogPath: logger.logFilePath
@@ -917,6 +922,7 @@ export async function startDaemon(): Promise<void> {
         const updatedState: DaemonLocallyPersistedState = {
           pid: process.pid,
           httpPort: controlPort,
+          controlToken,
           startTime: fileState.startTime,
           startedWithCliVersion: packageJson.version,
           lastHeartbeat: new Date().toLocaleString(),

@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SandboxConfig } from '@/persistence';
+import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 
 const {
     mockExecSync,
@@ -7,12 +7,16 @@ const {
     mockWrapForMcpTransport,
     mockSandboxCleanup,
     mockSpawn,
+    mockBuildSandboxedProcessEnv,
+    mockIsSandboxRuntimePlatformSupported,
 } = vi.hoisted(() => ({
     mockExecSync: vi.fn(),
     mockInitializeSandbox: vi.fn(),
     mockWrapForMcpTransport: vi.fn(),
     mockSandboxCleanup: vi.fn(),
     mockSpawn: vi.fn(),
+    mockBuildSandboxedProcessEnv: vi.fn(),
+    mockIsSandboxRuntimePlatformSupported: vi.fn(),
 }));
 
 vi.mock('node:child_process', () => ({
@@ -27,6 +31,15 @@ vi.mock('cross-spawn', () => ({
 vi.mock('@/sandbox/manager', () => ({
     initializeSandbox: mockInitializeSandbox,
     wrapForMcpTransport: mockWrapForMcpTransport,
+}));
+
+vi.mock('@/sandbox/env', () => ({
+    buildSandboxedProcessEnv: mockBuildSandboxedProcessEnv,
+}));
+
+vi.mock('@/sandbox/platform', () => ({
+    isSandboxRuntimePlatformSupported: mockIsSandboxRuntimePlatformSupported,
+    supportedSandboxPlatformSummary: vi.fn(() => 'macOS and Linux'),
 }));
 
 vi.mock('@/ui/logger', () => ({
@@ -98,7 +111,7 @@ async function waitFor(predicate: () => boolean, timeoutMs: number = 1000): Prom
     }
 }
 
-const sandboxConfig: SandboxConfig = {
+const sandboxConfig: SandboxConfig = SandboxConfigSchema.parse({
     enabled: true,
     workspaceRoot: '~/projects',
     sessionIsolation: 'workspace',
@@ -110,7 +123,7 @@ const sandboxConfig: SandboxConfig = {
     allowedDomains: [],
     deniedDomains: [],
     allowLocalBinding: true,
-};
+});
 
 describe('CodexAppServerClient sandbox integration', () => {
     const originalRustLog = process.env.RUST_LOG;
@@ -121,6 +134,12 @@ describe('CodexAppServerClient sandbox integration', () => {
         mockExecSync.mockReturnValue('codex-cli 0.107.0');
         mockInitializeSandbox.mockResolvedValue(mockSandboxCleanup);
         mockWrapForMcpTransport.mockResolvedValue({ command: 'sh', args: ['-c', 'wrapped codex app-server'] });
+        mockBuildSandboxedProcessEnv.mockReturnValue({
+            PATH: '/usr/bin',
+            CODEX_HOME: '/tmp/codex',
+            CLAUDE_CONFIG_DIR: '/tmp/claude',
+        });
+        mockIsSandboxRuntimePlatformSupported.mockReturnValue(true);
         mockSpawn.mockImplementation(() => createMockProcess());
     });
 
@@ -152,10 +171,39 @@ describe('CodexAppServerClient sandbox integration', () => {
         await client.disconnect();
     });
 
-    it('falls back to non-sandbox transport when sandbox initialization fails', async () => {
+    it('fails closed when sandbox initialization fails', async () => {
         mockInitializeSandbox.mockRejectedValue(new Error('sandbox init failed'));
         const { CodexAppServerClient } = await import('./codexAppServerClient');
         const client = new CodexAppServerClient(sandboxConfig);
+
+        await expect(client.connect()).rejects.toThrow('sandbox init failed');
+
+        expect(mockWrapForMcpTransport).not.toHaveBeenCalled();
+        expect(mockSpawn).not.toHaveBeenCalled();
+        expect(client.sandboxEnabled).toBe(false);
+    });
+
+    it('fails closed when sandbox is unsupported on the current platform', async () => {
+        mockIsSandboxRuntimePlatformSupported.mockReturnValue(false);
+
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient(sandboxConfig);
+
+        await expect(client.connect()).rejects.toThrow('Sandbox is only supported on macOS and Linux');
+
+        expect(mockInitializeSandbox).not.toHaveBeenCalled();
+        expect(mockWrapForMcpTransport).not.toHaveBeenCalled();
+        expect(mockSpawn).not.toHaveBeenCalled();
+        expect(client.sandboxEnabled).toBe(false);
+    });
+
+    it('falls back to non-sandbox transport when fallback is explicitly enabled', async () => {
+        mockInitializeSandbox.mockRejectedValue(new Error('sandbox init failed'));
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient(SandboxConfigSchema.parse({
+            ...sandboxConfig,
+            allowSandboxFallback: true,
+        }));
 
         await client.connect();
 
@@ -188,7 +236,7 @@ describe('CodexAppServerClient sandbox integration', () => {
     it('appends rollout log filter to existing RUST_LOG', async () => {
         process.env.RUST_LOG = 'info,codex_core=warn';
         const { CodexAppServerClient } = await import('./codexAppServerClient');
-        const client = new CodexAppServerClient(sandboxConfig);
+        const client = new CodexAppServerClient();
 
         await client.connect();
 

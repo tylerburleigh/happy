@@ -320,6 +320,7 @@ export type Metadata = {
   archiveReason?: string,
   flavor?: string
   sandbox?: SandboxConfig | null
+  sandboxStatus?: 'disabled' | 'configured' | 'enforced' | 'unsupported' | 'unavailable'
   dangerouslySkipPermissions?: boolean | null
   /** Lineage for sessions created via the fork / duplicate flow. */
   parentSessionId?: string
