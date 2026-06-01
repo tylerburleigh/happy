@@ -7,6 +7,7 @@ import { claudeRemoteLauncher } from "./claudeRemoteLauncher"
 import { ApiClient } from "@/lib"
 import type { JsRuntime } from "./runClaude"
 import type { SandboxConfig } from "@/persistence"
+import type { SandboxStatus } from "@/utils/createSessionMetadata"
 
 // Re-export permission mode type from api/types
 // Single unified type with 7 modes - Codex modes mapped at SDK boundary
@@ -41,6 +42,7 @@ interface LoopOptions {
     messageQueue: MessageQueue2<EnhancedMode>
     allowedTools?: string[]
     sandboxConfig?: SandboxConfig
+    onSandboxStatusChange?: (status: SandboxStatus) => void
     onSessionReady?: (session: Session) => void
     onAbort?: () => void
     /** Path to temporary settings file with SessionStart hook (required for session tracking) */
@@ -65,6 +67,7 @@ export async function loop(opts: LoopOptions): Promise<number> {
         messageQueue: opts.messageQueue,
         allowedTools: opts.allowedTools,
         sandboxConfig: opts.sandboxConfig,
+        onSandboxStatusChange: opts.onSandboxStatusChange,
         onModeChange: opts.onModeChange,
         onAbort: opts.onAbort,
         hookSettingsPath: opts.hookSettingsPath,

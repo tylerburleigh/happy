@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, parse, resolve } from 'node:path';
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import * as z from 'zod';
 import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
@@ -79,7 +79,7 @@ export function mergeSandboxConfig(
         ...globalConfig,
         enabled: globalConfig.enabled || projectConfig.enabled === true,
         sessionIsolation: stricter(globalConfig.sessionIsolation, projectConfig.sessionIsolation, ISOLATION_RANK),
-        workspaceRoot: projectConfig.workspaceRoot ?? globalConfig.workspaceRoot,
+        workspaceRoot: restrictWorkspaceRoot(globalConfig.workspaceRoot, projectConfig.workspaceRoot),
         customWritePaths: restrictList(globalConfig.customWritePaths, projectConfig.customWritePaths),
         extraWritePaths: restrictList(globalConfig.extraWritePaths, projectConfig.extraWritePaths),
         denyReadPaths: union(globalConfig.denyReadPaths, projectConfig.denyReadPaths),
@@ -90,10 +90,12 @@ export function mergeSandboxConfig(
         allowLocalBinding: projectConfig.allowLocalBinding === undefined
             ? globalConfig.allowLocalBinding
             : globalConfig.allowLocalBinding && projectConfig.allowLocalBinding,
-        allowSandboxFallback: projectConfig.allowSandboxFallback ?? globalConfig.allowSandboxFallback,
-        agentHomeMode: projectConfig.agentHomeMode ?? globalConfig.agentHomeMode,
-        isolatedCodexHome: projectConfig.isolatedCodexHome ?? globalConfig.isolatedCodexHome,
-        isolatedClaudeConfigDir: projectConfig.isolatedClaudeConfigDir ?? globalConfig.isolatedClaudeConfigDir,
+        allowSandboxFallback: projectConfig.allowSandboxFallback === undefined
+            ? globalConfig.allowSandboxFallback
+            : globalConfig.allowSandboxFallback && projectConfig.allowSandboxFallback,
+        agentHomeMode: globalConfig.agentHomeMode,
+        isolatedCodexHome: restrictIsolatedHome(globalConfig.isolatedCodexHome, projectConfig.isolatedCodexHome),
+        isolatedClaudeConfigDir: restrictIsolatedHome(globalConfig.isolatedClaudeConfigDir, projectConfig.isolatedClaudeConfigDir),
         envPassthrough: restrictEnvPassthrough(globalConfig.envPassthrough, projectConfig.envPassthrough),
     });
 }
@@ -113,7 +115,31 @@ function union(base: string[], extra: string[] | undefined): string[] {
 
 function restrictList(base: string[], project: string[] | undefined): string[] {
     if (!project) return base;
-    return project;
+    const allowed = new Set(project);
+    return base.filter((pathValue) => allowed.has(pathValue));
+}
+
+function restrictWorkspaceRoot(base: string | undefined, project: string | undefined): string | undefined {
+    if (!project) return base;
+    if (!base) return undefined;
+    return isSameOrChildPolicyPath(project, base) ? project : base;
+}
+
+function restrictIsolatedHome(base: string, project: string | undefined): string {
+    if (!project) return base;
+    return isSameOrChildPolicyPath(project, base) ? project : base;
+}
+
+function normalizePolicyPath(pathValue: string): string {
+    const expandedHome = pathValue.replace(/^~(?=\/|$)/, homedir());
+    return isAbsolute(expandedHome) ? resolve(expandedHome) : resolve(expandedHome);
+}
+
+function isSameOrChildPolicyPath(candidate: string, base: string): boolean {
+    const normalizedCandidate = normalizePolicyPath(candidate);
+    const normalizedBase = normalizePolicyPath(base);
+    const rel = relative(normalizedBase, normalizedCandidate);
+    return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
 }
 
 function restrictEnvPassthrough(base: string[], project: string[] | undefined): string[] {

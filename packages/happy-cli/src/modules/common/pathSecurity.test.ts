@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resolve } from 'path';
-import { validatePath } from './pathSecurity';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'path';
+import { validatePath, validateRealPath } from './pathSecurity';
 
 describe('validatePath', () => {
     const workingDir = resolve('/home/user/project');
@@ -41,5 +43,36 @@ describe('validatePath', () => {
             valid: true,
             resolvedPath: resolve('/home/user/project'),
         });
+    });
+
+    it('should reject symlinks that resolve outside the working directory', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-path-security-'));
+        const workspace = join(root, 'workspace');
+        const outside = join(root, 'outside');
+        mkdirSync(workspace);
+        mkdirSync(outside);
+        writeFileSync(join(outside, 'secret.txt'), 'secret');
+        symlinkSync(join(outside, 'secret.txt'), join(workspace, 'secret-link.txt'));
+
+        const result = await validateRealPath('secret-link.txt', workspace);
+
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('resolves outside the working directory');
+    });
+
+    it('should reject writes through symlinked parent directories', async () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-path-security-'));
+        const workspace = join(root, 'workspace');
+        const outside = join(root, 'outside');
+        mkdirSync(workspace);
+        mkdirSync(outside);
+        symlinkSync(outside, join(workspace, 'outside-link'));
+
+        const result = await validateRealPath('outside-link/new-file.txt', workspace, {
+            allowMissingTarget: true,
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain('resolves outside the working directory');
     });
 });

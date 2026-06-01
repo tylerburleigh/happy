@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { SandboxConfigSchema } from './persistence';
+import {
+    DEFAULT_SANDBOX_DENY_READ_PATHS,
+    DEFAULT_SANDBOX_DENY_WRITE_PATHS,
+    SandboxConfigSchema,
+} from './persistence';
 
 describe('SandboxConfigSchema', () => {
     it('applies defaults when values are omitted', () => {
@@ -9,9 +13,9 @@ describe('SandboxConfigSchema', () => {
             enabled: false,
             sessionIsolation: 'workspace',
             customWritePaths: [],
-            denyReadPaths: ['~/.ssh', '~/.aws', '~/.gnupg'],
+            denyReadPaths: DEFAULT_SANDBOX_DENY_READ_PATHS,
             extraWritePaths: ['/tmp'],
-            denyWritePaths: ['.env'],
+            denyWritePaths: DEFAULT_SANDBOX_DENY_WRITE_PATHS,
             networkMode: 'allowed',
             allowedDomains: [],
             deniedDomains: [],

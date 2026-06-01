@@ -7,7 +7,8 @@ import { join } from 'path';
 import { run as runRipgrep } from '@/modules/ripgrep/index';
 import { run as runDifftastic } from '@/modules/difftastic/index';
 import { RpcHandlerManager } from '../../api/rpc/RpcHandlerManager';
-import { validatePath } from './pathSecurity';
+import type { Metadata } from '@/api/types';
+import { validatePath, validateRealPath } from './pathSecurity';
 
 const execAsync = promisify(exec);
 
@@ -145,11 +146,37 @@ export type SpawnSessionResult =
 /**
  * Register all RPC handlers with the session
  */
-export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string) {
+type CommonHandlerOptions = {
+    sandbox?: unknown;
+    sandboxStatus?: Metadata['sandboxStatus'] | null;
+};
+
+function isSandboxRestricted(options?: CommonHandlerOptions): boolean {
+    if (!options) return false;
+    if (options.sandboxStatus && options.sandboxStatus !== 'disabled') return true;
+    return options.sandbox !== null && options.sandbox !== undefined;
+}
+
+function sandboxRpcError(operation: string): { success: false; error: string } {
+    return {
+        success: false,
+        error: `${operation} is disabled for sessions with Happy sandbox configured`,
+    };
+}
+
+export function registerCommonHandlers(
+    rpcHandlerManager: RpcHandlerManager,
+    workingDirectory: string,
+    options?: CommonHandlerOptions,
+) {
+    const sandboxRestricted = isSandboxRestricted(options);
 
     // Shell command handler - executes commands in the default shell
     rpcHandlerManager.registerHandler<BashRequest, BashResponse>('bash', async (data) => {
         logger.debug('Shell command request:', data.command);
+        if (sandboxRestricted) {
+            return sandboxRpcError('Shell command RPC');
+        }
 
         // Validate cwd if provided
         // Special case: "/" means "use shell's default cwd" (used by CLI detection)
@@ -238,7 +265,7 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
         logger.debug('Read file request:', data.path);
 
         // Validate path is within working directory
-        const validation = validatePath(data.path, workingDirectory);
+        const validation = await validateRealPath(data.path, workingDirectory);
         if (!validation.valid) {
             return { success: false, error: validation.error };
         }
@@ -258,7 +285,7 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
         logger.debug('Write file request:', data.path);
 
         // Validate path is within working directory
-        const validation = validatePath(data.path, workingDirectory);
+        const validation = await validateRealPath(data.path, workingDirectory, { allowMissingTarget: true });
         if (!validation.valid) {
             return { success: false, error: validation.error };
         }
@@ -324,7 +351,7 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
         logger.debug('List directory request:', data.path);
 
         // Validate path is within working directory
-        const validation = validatePath(data.path, workingDirectory);
+        const validation = await validateRealPath(data.path, workingDirectory);
         if (!validation.valid) {
             return { success: false, error: validation.error };
         }
@@ -346,13 +373,15 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
                         type = 'file';
                     }
 
-                    try {
-                        const stats = await stat(fullPath);
-                        size = stats.size;
-                        modified = stats.mtime.getTime();
-                    } catch (error) {
-                        // Ignore stat errors for individual files
-                        logger.debug(`Failed to stat ${fullPath}:`, error);
+                    if (!entry.isSymbolicLink()) {
+                        try {
+                            const stats = await stat(fullPath);
+                            size = stats.size;
+                            modified = stats.mtime.getTime();
+                        } catch (error) {
+                            // Ignore stat errors for individual files
+                            logger.debug(`Failed to stat ${fullPath}:`, error);
+                        }
                     }
 
                     return {
@@ -383,7 +412,7 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
         logger.debug('Get directory tree request:', data.path, 'maxDepth:', data.maxDepth);
 
         // Validate path is within working directory
-        const validation = validatePath(data.path, workingDirectory);
+        const validation = await validateRealPath(data.path, workingDirectory);
         if (!validation.valid) {
             return { success: false, error: validation.error };
         }
@@ -467,6 +496,9 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
     // Ripgrep handler - raw interface to ripgrep
     rpcHandlerManager.registerHandler<RipgrepRequest, RipgrepResponse>('ripgrep', async (data) => {
         logger.debug('Ripgrep request with args:', data.args, 'cwd:', data.cwd);
+        if (sandboxRestricted) {
+            return sandboxRpcError('Ripgrep RPC');
+        }
 
         // Validate cwd if provided
         if (data.cwd) {
@@ -497,6 +529,9 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
     // Difftastic handler - raw interface to difftastic
     rpcHandlerManager.registerHandler<DifftasticRequest, DifftasticResponse>('difftastic', async (data) => {
         logger.debug('Difftastic request with args:', data.args, 'cwd:', data.cwd);
+        if (sandboxRestricted) {
+            return sandboxRpcError('Difftastic RPC');
+        }
 
         // Validate cwd if provided
         if (data.cwd) {

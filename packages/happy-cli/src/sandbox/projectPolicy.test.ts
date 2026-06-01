@@ -40,9 +40,13 @@ describe('project sandbox policy', () => {
 
     it('merges project policy as restrictions', () => {
         const merged = mergeSandboxConfig(createConfig({
+            customWritePaths: ['~/projects/app', '~/projects/lib'],
             envPassthrough: ['PATH', 'OPENAI_API_KEY'],
         }), {
             sessionIsolation: 'strict',
+            workspaceRoot: '~/projects/app',
+            customWritePaths: ['~/projects/app', '~/elsewhere'],
+            extraWritePaths: ['/tmp', '/var/tmp'],
             denyReadPaths: ['~/.kube'],
             denyWritePaths: ['~/.zshrc'],
             networkMode: 'custom',
@@ -52,11 +56,35 @@ describe('project sandbox policy', () => {
         });
 
         expect(merged.sessionIsolation).toBe('strict');
+        expect(merged.workspaceRoot).toBe('~/projects/app');
+        expect(merged.customWritePaths).toEqual(['~/projects/app']);
+        expect(merged.extraWritePaths).toEqual(['/tmp']);
         expect(merged.denyReadPaths).toEqual(['~/.ssh', '~/.kube']);
         expect(merged.denyWritePaths).toEqual(['.env', '~/.zshrc']);
         expect(merged.allowedDomains).toEqual(['github.com']);
         expect(merged.allowLocalBinding).toBe(false);
         expect(merged.envPassthrough).toEqual(['PATH']);
+    });
+
+    it('does not let project policy weaken fallback, homes, or workspace scope', () => {
+        const merged = mergeSandboxConfig(createConfig({
+            allowSandboxFallback: false,
+            agentHomeMode: 'isolated',
+            isolatedCodexHome: '~/.happy/agent-homes/codex',
+            isolatedClaudeConfigDir: '~/.happy/agent-homes/claude',
+        }), {
+            workspaceRoot: '~/',
+            allowSandboxFallback: true,
+            agentHomeMode: 'shared',
+            isolatedCodexHome: '~/.codex',
+            isolatedClaudeConfigDir: '~/.claude',
+        });
+
+        expect(merged.workspaceRoot).toBe('~/projects');
+        expect(merged.allowSandboxFallback).toBe(false);
+        expect(merged.agentHomeMode).toBe('isolated');
+        expect(merged.isolatedCodexHome).toBe('~/.happy/agent-homes/codex');
+        expect(merged.isolatedClaudeConfigDir).toBe('~/.happy/agent-homes/claude');
     });
 
     it('applies project policy when resolving sandbox config', () => {

@@ -192,6 +192,9 @@ export interface AcpBackendOptions {
   /** Environment variables to pass to the agent */
   env?: Record<string, string>;
 
+  /** Use env exactly instead of overlaying it on process.env. */
+  replaceEnv?: boolean;
+
   /** MCP servers to make available to the agent */
   mcpServers?: Record<string, McpServerConfig>;
 
@@ -384,6 +387,9 @@ export class AcpBackend implements AgentBackend {
       logger.debug(`[AcpBackend] Starting session: ${sessionId}`);
       // Spawn the ACP agent process
       const args = this.options.args || [];
+      const env = this.options.replaceEnv
+        ? this.options.env
+        : { ...process.env, ...this.options.env };
       
       // On Windows, spawn via cmd.exe to handle .cmd files and PATH resolution
       // This ensures proper stdio piping without shell buffering
@@ -391,14 +397,14 @@ export class AcpBackend implements AgentBackend {
         const fullCommand = [this.options.command, ...args].join(' ');
         this.process = spawn('cmd.exe', ['/c', fullCommand], {
           cwd: this.options.cwd,
-          env: { ...process.env, ...this.options.env },
+          env,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
         });
       } else {
         this.process = spawn(this.options.command, args, {
           cwd: this.options.cwd,
-          env: { ...process.env, ...this.options.env },
+          env,
           // Use 'pipe' for all stdio to capture output without printing to console
           // stdout and stderr will be handled by our event listeners
           stdio: ['pipe', 'pipe', 'pipe'],

@@ -9,6 +9,7 @@ import { AcpSessionManager } from './AcpSessionManager';
 import type { SessionEnvelope } from '@slopus/happy-wire';
 import { logger } from '@/ui/logger';
 import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
+import { buildSandboxedProcessEnv } from '@/sandbox/env';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { hashObject } from '@/utils/deterministicJson';
 import { Credentials, readSettings } from '@/persistence';
@@ -466,6 +467,9 @@ export async function runAcp(opts: {
   }
 
   const sandboxConfig = resolveSandboxConfig(settings.sandboxConfig, process.cwd());
+  const sandboxedAgentEnv = sandboxConfig?.enabled
+    ? buildSandboxedProcessEnv(process.env, sandboxConfig, process.cwd()) as Record<string, string>
+    : undefined;
 
   await api.getOrCreateMachine({
     machineId: settings.machineId,
@@ -477,6 +481,7 @@ export async function runAcp(opts: {
     machineId: settings.machineId,
     startedBy: opts.startedBy,
     sandbox: sandboxConfig,
+    sandboxStatus: sandboxConfig?.enabled ? 'unsupported' : 'disabled',
   });
   const response = await api.getOrCreateSession({ tag: sessionTag, metadata, state });
   if (response) {
@@ -544,6 +549,8 @@ export async function runAcp(opts: {
     cwd: process.cwd(),
     command: opts.command,
     args: opts.args,
+    env: sandboxedAgentEnv,
+    replaceEnv: Boolean(sandboxedAgentEnv),
     mcpServers,
     permissionHandler,
     transportHandler: new DefaultTransport(opts.agentName),

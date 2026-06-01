@@ -30,6 +30,7 @@ describe('createSessionMetadata', () => {
         });
 
         expect(metadata.sandbox).toEqual(sandbox);
+        expect(metadata.sandboxStatus).toBe('configured');
     });
 
     it('sets metadata.sandbox to null when sandbox is disabled', () => {
@@ -42,6 +43,7 @@ describe('createSessionMetadata', () => {
         });
 
         expect(metadata.sandbox).toBeNull();
+        expect(metadata.sandboxStatus).toBe('disabled');
     });
 
     it('sets metadata.sandbox to null when sandbox is not provided', () => {
@@ -51,6 +53,7 @@ describe('createSessionMetadata', () => {
         });
 
         expect(metadata.sandbox).toBeNull();
+        expect(metadata.sandboxStatus).toBe('disabled');
     });
 
     it('sets metadata.dangerouslySkipPermissions to null when not provided', () => {
@@ -70,5 +73,18 @@ describe('createSessionMetadata', () => {
         });
 
         expect(metadata.dangerouslySkipPermissions).toBe(true);
+    });
+
+    it('preserves explicit sandbox status', () => {
+        const sandbox = createSandboxConfig();
+        const { metadata } = createSessionMetadata({
+            flavor: 'gemini',
+            machineId: 'machine-6',
+            sandbox,
+            sandboxStatus: 'unsupported',
+        });
+
+        expect(metadata.sandbox).toEqual(sandbox);
+        expect(metadata.sandboxStatus).toBe('unsupported');
     });
 });

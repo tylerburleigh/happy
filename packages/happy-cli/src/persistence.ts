@@ -15,14 +15,52 @@ import type { Metadata } from '@/api/types';
 import { logger } from '@/ui/logger';
 import { ensurePrivateDir, PRIVATE_FILE_MODE, writePrivateFile } from '@/utils/privateFiles';
 
+export const DEFAULT_SANDBOX_DENY_READ_PATHS = [
+  '~/.ssh',
+  '~/.aws',
+  '~/.gnupg',
+  '~/.kube',
+  '~/.docker',
+  '~/.config/gh',
+  '~/.azure',
+  '~/.npmrc',
+  '~/.pypirc',
+  '~/.netrc',
+  '~/.git-credentials',
+  '~/.terraform.d',
+  '~/Library/Keychains',
+  '.env',
+  '.env.local',
+  '.env.*',
+];
+
+export const DEFAULT_SANDBOX_DENY_WRITE_PATHS = [
+  '.env',
+  '.env.local',
+  '.env.*',
+  '.happy/sandbox.json',
+  '.git/hooks',
+  '.git/config',
+  '~/.zshrc',
+  '~/.bashrc',
+  '~/.profile',
+  '~/.gitconfig',
+  '~/.git-credentials',
+  '~/.happy/settings.json',
+  '~/.happy/access.key',
+  '~/.claude/settings.json',
+  '~/.claude/settings.local.json',
+  '~/.codex/config.toml',
+];
+
 export const SandboxConfigSchema = z.object({
   enabled: z.boolean().default(false),
   workspaceRoot: z.string().optional(),
   sessionIsolation: z.enum(['strict', 'workspace', 'custom']).default('workspace'),
   customWritePaths: z.array(z.string()).default([]),
-  denyReadPaths: z.array(z.string()).default(['~/.ssh', '~/.aws', '~/.gnupg']),
+  denyReadPaths: z.array(z.string()).default(DEFAULT_SANDBOX_DENY_READ_PATHS),
   extraWritePaths: z.array(z.string()).default(['/tmp']),
-  denyWritePaths: z.array(z.string()).default(['.env']),
+  denyWritePaths: z.array(z.string()).default(DEFAULT_SANDBOX_DENY_WRITE_PATHS),
   networkMode: z.enum(['blocked', 'allowed', 'custom']).default('allowed'),
   allowedDomains: z.array(z.string()).default([]),
   deniedDomains: z.array(z.string()).default([]),

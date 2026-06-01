@@ -68,9 +68,9 @@ export function getCodexPermissionModes(translate: Translate): PermissionMode[] 
 export function getGeminiPermissionModes(translate: Translate): PermissionMode[] {
     return [
         { key: 'default', name: translate('agentInput.geminiPermissionMode.default'), description: null },
-        { key: 'auto_edit', name: translate('agentInput.geminiPermissionMode.autoEdit'), description: null },
+        { key: 'read-only', name: translate('agentInput.codexPermissionMode.readOnly'), description: null },
+        { key: 'safe-yolo', name: translate('agentInput.codexPermissionMode.safeYolo'), description: null },
         { key: 'yolo', name: translate('agentInput.geminiPermissionMode.yolo'), description: null },
-        { key: 'plan', name: translate('agentInput.geminiPermissionMode.plan'), description: null },
     ];
 }
 

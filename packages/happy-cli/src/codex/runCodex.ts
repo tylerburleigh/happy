@@ -129,6 +129,7 @@ export async function runCodex(opts: {
         machineId,
         startedBy: opts.startedBy,
         sandbox: sandboxConfig,
+        sandboxStatus: sandboxConfig?.enabled ? 'configured' : 'disabled',
         dangerouslySkipPermissions: initialPermissionMode === 'yolo' || initialPermissionMode === 'bypassPermissions',
     });
 
@@ -677,6 +678,13 @@ export async function runCodex(opts: {
         logger.debug('[codex]: client.connect begin');
         await client.connect();
         logger.debug('[codex]: client.connect done');
+        if (sandboxConfig?.enabled) {
+            session.updateMetadata((currentMetadata) => ({
+                ...currentMetadata,
+                sandbox: sandboxConfig,
+                sandboxStatus: client.sandboxEnabled ? 'enforced' : 'unavailable',
+            }));
+        }
 
         if (opts.resumeThreadId) {
             await resumeExistingThread({

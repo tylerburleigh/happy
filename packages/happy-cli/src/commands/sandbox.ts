@@ -3,6 +3,8 @@ import inquirer from 'inquirer';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
+    DEFAULT_SANDBOX_DENY_READ_PATHS,
+    DEFAULT_SANDBOX_DENY_WRITE_PATHS,
     SandboxConfigSchema,
     readSettings,
     updateSettings,
@@ -10,38 +12,6 @@ import {
 } from '@/persistence';
 
 const DEFAULT_WORKSPACE_ROOT = '~/Workspace';
-const DEFAULT_DENY_READ_PATHS = [
-    '~/.ssh',
-    '~/.aws',
-    '~/.gnupg',
-    '~/.kube',
-    '~/.docker',
-    '~/.config/gh',
-    '~/.azure',
-    '~/.npmrc',
-    '~/.pypirc',
-    '~/.netrc',
-    '~/.git-credentials',
-    '~/.terraform.d',
-    '~/Library/Keychains',
-];
-const DEFAULT_DENY_WRITE_PATHS = [
-    '.env',
-    '.env.local',
-    '.env.*',
-    '.git/hooks',
-    '.git/config',
-    '~/.zshrc',
-    '~/.bashrc',
-    '~/.profile',
-    '~/.gitconfig',
-    '~/.git-credentials',
-    '~/.happy/settings.json',
-    '~/.happy/access.key',
-    '~/.claude/settings.json',
-    '~/.claude/settings.local.json',
-    '~/.codex/config.toml',
-];
 
 type ScopeMode = 'workspace' | 'project';
 
@@ -150,9 +120,9 @@ export async function handleSandboxConfigure(): Promise<void> {
         workspaceRoot: scopeMode === 'workspace' ? answers.workspaceRoot || workspaceRootDefault : undefined,
         sessionIsolation: scopeMode === 'workspace' ? 'workspace' : 'strict',
         customWritePaths: [],
-        denyReadPaths: DEFAULT_DENY_READ_PATHS,
+        denyReadPaths: DEFAULT_SANDBOX_DENY_READ_PATHS,
         extraWritePaths: ['/tmp'],
-        denyWritePaths: DEFAULT_DENY_WRITE_PATHS,
+        denyWritePaths: DEFAULT_SANDBOX_DENY_WRITE_PATHS,
         networkMode: answers.networkMode,
         allowedDomains: [],
         deniedDomains: [],
