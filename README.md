@@ -14,6 +14,17 @@
 Use Claude Code or Codex from anywhere with end-to-end encryption.
 </h4>
 
+> **Fork note: sandbox hardening preview**
+>
+> This fork adds experimental sandbox-focused security improvements for running AI agents through Happy:
+>
+> - Happy-managed sandboxing for Claude, Codex, Gemini, and ACP-backed agents, including isolated agent homes, secret-like environment stripping, guarded credential/clipboard CLIs, and fail-closed startup when sandboxing is unavailable unless fallback is explicitly enabled.
+> - Per-project sandbox policy support via `.happy/sandbox.json`, with stricter project overrides and default write scoping narrowed to the current Git worktree when available.
+> - Semantic approval checks for risky agent actions, including Git history/ref mutations, GitHub CLI token/destructive operations, package publishing, and edits to policy or credential-adjacent files.
+> - Additional path-safety checks, sandbox status metadata in the app, and redaction for secrets in logs/API payloads.
+>
+> The threat model is an AI agent making mistakes inside a legitimate session, not a fully hostile local process. These changes are intended to reduce accidental blast radius while preserving mobile-first approval UX.
+
 <div align="center">
   
 [📱 **iOS App**](https://apps.apple.com/us/app/happy-claude-code-client/id6748571505) • [🤖 **Android App**](https://play.google.com/store/apps/details?id=com.ex3ndr.happy) • [🌐 **Web App**](https://app.happy.engineering) • [🎥 **See a Demo**](https://youtu.be/GCS0OG9QMSE) • [📚 **Documentation**](https://happy.engineering/docs/) • [💬 **Discord**](https://discord.gg/fX9WBAhyfD)
