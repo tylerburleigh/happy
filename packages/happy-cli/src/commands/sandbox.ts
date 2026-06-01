@@ -79,10 +79,10 @@ export async function handleSandboxConfigure(): Promise<void> {
             type: 'list',
             name: 'scopeMode',
             message: 'How should file access be scoped?',
-            default: 'workspace',
+            default: 'project',
             choices: [
+                { name: 'per-project - Only the current project/worktree', value: 'project' },
                 { name: 'workspace - Full workspace root directory', value: 'workspace' },
-                { name: 'per-project - Only current project directory', value: 'project' },
             ],
         },
         {

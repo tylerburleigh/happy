@@ -26,21 +26,21 @@ export function resolveSandboxConfig(
 ): SandboxConfig | undefined {
     const projectPolicyPath = findProjectSandboxPolicy(startDir);
     if (!projectPolicyPath) {
-        return globalConfig;
+        return scopeWorkspaceRootToGitWorktree(globalConfig, startDir);
     }
 
     const projectConfig = readProjectSandboxPolicy(projectPolicyPath);
     if (!projectConfig) {
-        return globalConfig;
+        return scopeWorkspaceRootToGitWorktree(globalConfig, startDir);
     }
 
     if (!globalConfig) {
-        return SandboxConfigSchema.parse(projectConfig);
+        return scopeWorkspaceRootToGitWorktree(SandboxConfigSchema.parse(projectConfig), startDir);
     }
 
     const merged = mergeSandboxConfig(globalConfig, projectConfig);
     logger.debug(`[sandbox] Applied project sandbox policy: ${projectPolicyPath}`);
-    return merged;
+    return scopeWorkspaceRootToGitWorktree(merged, startDir);
 }
 
 export function findProjectSandboxPolicy(startDir: string): string | null {
@@ -140,6 +140,45 @@ function isSameOrChildPolicyPath(candidate: string, base: string): boolean {
     const normalizedBase = normalizePolicyPath(base);
     const rel = relative(normalizedBase, normalizedCandidate);
     return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
+}
+
+export function findGitWorktreeRoot(startDir: string): string | null {
+    let current = resolve(startDir);
+    const root = parse(current).root;
+
+    while (true) {
+        const gitPath = join(current, '.git');
+        if (existsSync(gitPath)) {
+            return current;
+        }
+        if (current === root || current === homedir()) {
+            return null;
+        }
+        current = dirname(current);
+    }
+}
+
+export function scopeWorkspaceRootToGitWorktree(
+    config: SandboxConfig | undefined,
+    startDir: string,
+): SandboxConfig | undefined {
+    if (!config?.enabled || config.sessionIsolation !== 'workspace') {
+        return config;
+    }
+
+    const worktreeRoot = findGitWorktreeRoot(startDir);
+    if (!worktreeRoot) {
+        return config;
+    }
+
+    if (config.workspaceRoot && isSameOrChildPolicyPath(config.workspaceRoot, worktreeRoot)) {
+        return config;
+    }
+
+    return SandboxConfigSchema.parse({
+        ...config,
+        workspaceRoot: worktreeRoot,
+    });
 }
 
 function restrictEnvPassthrough(base: string[], project: string[] | undefined): string[] {

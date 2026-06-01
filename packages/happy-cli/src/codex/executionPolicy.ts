@@ -6,7 +6,7 @@ export function resolveCodexExecutionPolicy(
 ): { approvalPolicy: ApprovalPolicy; sandbox: SandboxMode } {
     if (sandboxManagedByHappy) {
         return {
-            approvalPolicy: 'never',
+            approvalPolicy: 'untrusted',
             sandbox: 'danger-full-access',
         };
     }

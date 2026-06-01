@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { resolveCodexExecutionPolicy } from '../executionPolicy';
 
 describe('resolveCodexExecutionPolicy', () => {
-    it('forces never + danger-full-access when sandbox is managed by Happy', () => {
+    it('uses approval callbacks + danger-full-access when sandbox is managed by Happy', () => {
         const policy = resolveCodexExecutionPolicy('default', true);
 
         expect(policy).toEqual({
-            approvalPolicy: 'never',
+            approvalPolicy: 'untrusted',
             sandbox: 'danger-full-access',
         });
     });

@@ -46,6 +46,12 @@ describe('handleSandboxCommand', () => {
         await handleSandboxCommand(['configure']);
 
         expect(mockPrompt).toHaveBeenCalled();
+        expect(mockPrompt.mock.calls[0]?.[0]).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                name: 'scopeMode',
+                default: 'project',
+            }),
+        ]));
     });
 
     it('routes status subcommand', async () => {

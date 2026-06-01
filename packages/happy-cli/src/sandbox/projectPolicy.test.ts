@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
 import {
+    findGitWorktreeRoot,
     findProjectSandboxPolicy,
     mergeSandboxConfig,
     resolveSandboxConfig,
+    scopeWorkspaceRootToGitWorktree,
 } from './projectPolicy';
 
 function createConfig(overrides: Partial<SandboxConfig> = {}): SandboxConfig {
@@ -85,6 +87,57 @@ describe('project sandbox policy', () => {
         expect(merged.agentHomeMode).toBe('isolated');
         expect(merged.isolatedCodexHome).toBe('~/.happy/agent-homes/codex');
         expect(merged.isolatedClaudeConfigDir).toBe('~/.happy/agent-homes/claude');
+    });
+
+    it('finds the git worktree root from nested directories', () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-worktree-policy-'));
+        const nested = join(root, 'packages', 'cli');
+        mkdirSync(join(root, '.git'), { recursive: true });
+        mkdirSync(nested, { recursive: true });
+
+        expect(findGitWorktreeRoot(nested)).toBe(root);
+    });
+
+    it('narrows workspace isolation to the current git worktree root', () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-worktree-policy-'));
+        const nested = join(root, 'packages', 'cli');
+        mkdirSync(join(root, '.git'), { recursive: true });
+        mkdirSync(nested, { recursive: true });
+
+        const scoped = scopeWorkspaceRootToGitWorktree(createConfig({
+            workspaceRoot: '~/Developer',
+            sessionIsolation: 'workspace',
+        }), nested);
+
+        expect(scoped?.workspaceRoot).toBe(root);
+    });
+
+    it('applies git worktree scoping when resolving global sandbox config', () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-worktree-policy-'));
+        const nested = join(root, 'packages', 'cli');
+        mkdirSync(join(root, '.git'), { recursive: true });
+        mkdirSync(nested, { recursive: true });
+
+        const resolved = resolveSandboxConfig(createConfig({
+            workspaceRoot: '~/Developer',
+            sessionIsolation: 'workspace',
+        }), nested);
+
+        expect(resolved?.workspaceRoot).toBe(root);
+    });
+
+    it('does not broaden a workspace root already narrowed below the git worktree', () => {
+        const root = mkdtempSync(join(tmpdir(), 'happy-worktree-policy-'));
+        const nested = join(root, 'packages', 'cli');
+        mkdirSync(join(root, '.git'), { recursive: true });
+        mkdirSync(nested, { recursive: true });
+
+        const scoped = scopeWorkspaceRootToGitWorktree(createConfig({
+            workspaceRoot: nested,
+            sessionIsolation: 'workspace',
+        }), nested);
+
+        expect(scoped?.workspaceRoot).toBe(nested);
     });
 
     it('applies project policy when resolving sandbox config', () => {

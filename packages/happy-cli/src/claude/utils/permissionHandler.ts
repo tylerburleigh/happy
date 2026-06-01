@@ -10,6 +10,11 @@ import { PermissionResult } from "../sdk/types";
 import { Session } from "../session";
 import { EnhancedMode, PermissionMode } from "../loop";
 import { getToolDescriptor } from "./getToolDescriptor";
+import {
+    evaluateFileChangeSecurityPolicy,
+    evaluateShellSecurityPolicy,
+    type SecurityPolicyDecision,
+} from "@/security/policy";
 
 interface PermissionResponse {
     id: string;
@@ -27,6 +32,45 @@ interface PendingRequest {
     reject: (error: Error) => void;
     toolName: string;
     input: unknown;
+}
+
+const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+function attachSecurityPolicy(input: unknown, securityPolicy: SecurityPolicyDecision): unknown {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+        return {
+            ...(input as Record<string, unknown>),
+            securityPolicy,
+        };
+    }
+
+    return {
+        input,
+        securityPolicy,
+    };
+}
+
+function securityDenyResult(securityPolicy: SecurityPolicyDecision): PermissionResult {
+    return {
+        behavior: 'deny',
+        message: `Blocked by Happy security policy: ${securityPolicy.reason}`,
+    };
+}
+
+function claudeFileChangeInput(input: unknown): Record<string, unknown> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return {};
+    }
+
+    const record = input as Record<string, unknown>;
+    const changes: Record<string, unknown> = {};
+    for (const key of ['file_path', 'path', 'notebook_path']) {
+        const pathValue = record[key];
+        if (typeof pathValue === 'string' && pathValue.length > 0) {
+            changes[pathValue] = {};
+        }
+    }
+    return changes;
 }
 
 export class PermissionHandler {
@@ -136,6 +180,37 @@ export class PermissionHandler {
         // This mirrors Claude SDK's internal requiresUserInteraction() check.
         if (toolName === 'AskUserQuestion') {
             return this.handlePermissionRequest(toolCallId, toolName, input, options.signal);
+        }
+
+        if (toolName === 'Bash') {
+            const inputObj = input as { command?: string };
+            if (inputObj?.command) {
+                const securityPolicy = evaluateShellSecurityPolicy({ command: inputObj.command });
+                if (securityPolicy.decision === 'deny') {
+                    return securityDenyResult(securityPolicy);
+                }
+
+                if (securityPolicy.decision === 'ask') {
+                    return this.handlePermissionRequest(
+                        toolCallId,
+                        toolName,
+                        attachSecurityPolicy(input, securityPolicy),
+                        options.signal,
+                    );
+                }
+            }
+        } else if (FILE_EDIT_TOOLS.has(toolName)) {
+            const securityPolicy = evaluateFileChangeSecurityPolicy({
+                fileChanges: claudeFileChangeInput(input),
+            });
+            if (securityPolicy.decision === 'ask') {
+                return this.handlePermissionRequest(
+                    toolCallId,
+                    toolName,
+                    attachSecurityPolicy(input, securityPolicy),
+                    options.signal,
+                );
+            }
         }
 
         // Check if tool is explicitly allowed
