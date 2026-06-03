@@ -24,6 +24,7 @@ import {
   determineGeminiModel,
   getGeminiModelSource
 } from '@/gemini/utils/config';
+import type { SandboxConfig } from '@/persistence';
 
 /**
  * Options for creating a Gemini ACP backend
@@ -51,6 +52,9 @@ export interface GeminiBackendOptions extends AgentFactoryOptions {
 
   /** Use env exactly instead of overlaying it on process.env. */
   replaceEnv?: boolean;
+
+  /** Optional OS-level sandbox configuration for the spawned Gemini ACP agent. */
+  sandboxConfig?: SandboxConfig;
 }
 
 /**
@@ -148,6 +152,7 @@ export function createGeminiBackend(options: GeminiBackendOptions): GeminiBacken
     mcpServers: options.mcpServers,
     permissionHandler: options.permissionHandler,
     transportHandler: geminiTransport,
+    sandboxConfig: options.sandboxConfig,
     // Check if prompt instructs the agent to change title (for auto-approval of change_title tool)
     hasChangeTitleInstruction: (prompt: string) => {
       const lower = prompt.toLowerCase();

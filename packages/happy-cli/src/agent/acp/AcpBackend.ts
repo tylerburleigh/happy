@@ -33,6 +33,10 @@ import type {
 } from '../core';
 import { logger } from '@/ui/logger';
 import { delay } from '@/utils/time';
+import type { SandboxConfig } from '@/persistence';
+import { initializeSandbox, wrapForMcpTransport } from '@/sandbox/manager';
+import { buildSandboxedProcessEnv } from '@/sandbox/env';
+import { buildSandboxRuntimeEnv } from '@/sandbox/temp';
 import packageJson from '../../../package.json';
 
 /**
@@ -209,6 +213,9 @@ export interface AcpBackendOptions {
 
   /** Log raw session updates to console */
   verbose?: boolean;
+
+  /** Optional OS-level sandbox configuration for the spawned ACP agent. */
+  sandboxConfig?: SandboxConfig;
 }
 
 /**
@@ -344,6 +351,7 @@ export class AcpBackend implements AgentBackend {
   private toolCallCountSincePrompt = 0;
   /** Timeout for emitting 'idle' status after last message chunk */
   private idleTimeout: NodeJS.Timeout | null = null;
+  private sandboxCleanup: (() => Promise<void>) | null = null;
 
   /** Transport handler for agent-specific behavior */
   private readonly transport: TransportHandler;
@@ -374,6 +382,20 @@ export class AcpBackend implements AgentBackend {
     }
   }
 
+  private async cleanupSandboxRuntime(): Promise<void> {
+    if (!this.sandboxCleanup) {
+      return;
+    }
+
+    const cleanup = this.sandboxCleanup;
+    this.sandboxCleanup = null;
+    try {
+      await cleanup();
+    } catch (error) {
+      logger.debug('[AcpBackend] Sandbox cleanup failed:', error);
+    }
+  }
+
   async startSession(initialPrompt?: string): Promise<StartSessionResult> {
     if (this.disposed) {
       throw new Error('Backend has been disposed');
@@ -387,24 +409,50 @@ export class AcpBackend implements AgentBackend {
       logger.debug(`[AcpBackend] Starting session: ${sessionId}`);
       // Spawn the ACP agent process
       const args = this.options.args || [];
-      const env = this.options.replaceEnv
-        ? this.options.env
-        : { ...process.env, ...this.options.env };
+      let command = this.options.command;
+      let spawnArgs = args;
+
+      if (this.options.sandboxConfig?.enabled) {
+        if (process.platform === 'win32') {
+          throw new Error('Sandbox is enabled, but Happy sandboxing is not supported on Windows.');
+        }
+
+        try {
+          this.sandboxCleanup = await initializeSandbox(this.options.sandboxConfig, this.options.cwd);
+          const wrapped = await wrapForMcpTransport(command, spawnArgs);
+          command = wrapped.command;
+          spawnArgs = wrapped.args;
+          logger.debug(`[AcpBackend] Sandbox enabled for ${this.options.agentName}`);
+        } catch (error) {
+          await this.cleanupSandboxRuntime();
+          this.sandboxCleanup = null;
+          throw new Error(`Sandbox is enabled, but failed to initialize: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      const childEnv = this.options.sandboxConfig?.enabled
+        ? buildSandboxedProcessEnv(process.env, {
+          ...this.options.env,
+          ...buildSandboxRuntimeEnv(this.options.cwd),
+        })
+        : this.options.replaceEnv
+          ? this.options.env
+          : { ...process.env, ...this.options.env };
       
       // On Windows, spawn via cmd.exe to handle .cmd files and PATH resolution
       // This ensures proper stdio piping without shell buffering
       if (process.platform === 'win32') {
-        const fullCommand = [this.options.command, ...args].join(' ');
+        const fullCommand = [command, ...spawnArgs].join(' ');
         this.process = spawn('cmd.exe', ['/c', fullCommand], {
           cwd: this.options.cwd,
-          env,
+          env: childEnv,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
         });
       } else {
-        this.process = spawn(this.options.command, args, {
+        this.process = spawn(command, spawnArgs, {
           cwd: this.options.cwd,
-          env,
+          env: childEnv,
           // Use 'pipe' for all stdio to capture output without printing to console
           // stdout and stderr will be handled by our event listeners
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -859,6 +907,13 @@ export class AcpBackend implements AgentBackend {
       return { sessionId };
 
     } catch (error) {
+      if (this.process) {
+        try {
+          this.process.kill('SIGTERM');
+        } catch { /* ignore while surfacing startup error */ }
+        this.process = null;
+      }
+      await this.cleanupSandboxRuntime();
       // Log to file only, not console
       logger.debug('[AcpBackend] Error starting session:', error);
       if (!startupStatusErrorEmitted) {
@@ -1325,6 +1380,8 @@ export class AcpBackend implements AgentBackend {
       clearTimeout(this.idleTimeout);
       this.idleTimeout = null;
     }
+
+    await this.cleanupSandboxRuntime();
 
     // Clear state
     this.listeners = [];

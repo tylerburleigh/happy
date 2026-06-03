@@ -128,6 +128,11 @@ unless `allowSandboxFallback` is explicitly enabled.
 When the sandbox is enabled, Happy now fails closed if the sandbox cannot start,
 filters globally exported secret-looking environment variables from agent
 subprocesses, and uses isolated Codex/Claude homes by default.
+This fork also hardens daemon control access, redacts sensitive control-plane
+logs, records sandbox status in session metadata, and adds stricter approval
+checks for credential-adjacent files and destructive developer commands. See
+`docs/plans/happy-egress-proxy-and-credential-broker.md` for the planned
+network egress proxy and credential broker layer.
 
 ```bash
 happy sandbox configure

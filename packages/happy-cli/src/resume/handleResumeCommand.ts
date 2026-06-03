@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { Metadata } from '@/api/types';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
@@ -8,6 +9,7 @@ import { resolveHappySession, type ResumableHappySession } from './resolveHappyS
 export type ResumeLaunch = {
     cwd: string;
     args: string[];
+    env?: Record<string, string>;
 };
 
 export type ResumeLaunchOptions = {
@@ -46,6 +48,91 @@ function resolveFlavor(metadata: Metadata): 'codex' | 'claude' | null {
     return null;
 }
 
+function assertWellFormedSandboxStatePath(pathValue: string, label: string): string {
+    if (pathValue.trim().length === 0 || pathValue !== pathValue.trim()) {
+        throw new Error(`Saved sandbox state ${label} is empty or whitespace-padded.`);
+    }
+
+    if (/[\u0000-\u001f\u007f]/.test(pathValue)) {
+        throw new Error(`Saved sandbox state ${label} contains control characters.`);
+    }
+
+    if (!isAbsolute(pathValue)) {
+        throw new Error(`Saved sandbox state ${label} must be an absolute path.`);
+    }
+
+    if (pathValue.split(/[\\/]+/).includes('..')) {
+        throw new Error(`Saved sandbox state ${label} may not contain parent directory traversal.`);
+    }
+
+    return resolve(pathValue);
+}
+
+function isPathInside(parent: string, child: string): boolean {
+    const relativePath = relative(parent, child);
+    return relativePath === '' || (relativePath.length > 0 && !relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function assertWellFormedResumeIdentifier(value: string, label: string): string {
+    if (value.trim().length === 0 || value !== value.trim()) {
+        throw new Error(`Saved ${label} is empty or whitespace-padded.`);
+    }
+
+    if (value.length > 256) {
+        throw new Error(`Saved ${label} is too long.`);
+    }
+
+    if (/[\s\u0000-\u001f\u007f]/.test(value)) {
+        throw new Error(`Saved ${label} contains whitespace or control characters.`);
+    }
+
+    if (value.startsWith('-')) {
+        throw new Error(`Saved ${label} must not look like a command-line flag.`);
+    }
+
+    return value;
+}
+
+function validateSandboxProviderStatePath(metadata: Metadata, providerPath: string, providerName: 'claude' | 'codex'): string {
+    if (!metadata.sandboxState?.root) {
+        throw new Error(`Saved sandbox state for ${providerName} is missing its root path.`);
+    }
+
+    const happyHomeDir = assertWellFormedSandboxStatePath(metadata.happyHomeDir, 'Happy home path');
+    const sandboxStateRoot = assertWellFormedSandboxStatePath(metadata.sandboxState.root, 'root path');
+    const sandboxStateBase = join(happyHomeDir, 'tmp', 'sandbox-state');
+    if (!isPathInside(sandboxStateBase, sandboxStateRoot)) {
+        throw new Error(`Saved sandbox state root is outside the recorded Happy sandbox-state directory.`);
+    }
+
+    const resolvedProviderPath = assertWellFormedSandboxStatePath(providerPath, `${providerName} provider path`);
+    const expectedProviderPath = join(sandboxStateRoot, providerName);
+    if (resolvedProviderPath !== expectedProviderPath) {
+        throw new Error(`Saved sandbox state ${providerName} provider path does not match its root.`);
+    }
+
+    return resolvedProviderPath;
+}
+
+function buildSandboxStateEnv(metadata: Metadata): Record<string, string> | undefined {
+    const env: Record<string, string> = {};
+    if (metadata.sandboxState?.claudeConfigDir) {
+        env.CLAUDE_CONFIG_DIR = validateSandboxProviderStatePath(
+            metadata,
+            metadata.sandboxState.claudeConfigDir,
+            'claude',
+        );
+    }
+    if (metadata.sandboxState?.codexHome) {
+        env.CODEX_HOME = validateSandboxProviderStatePath(
+            metadata,
+            metadata.sandboxState.codexHome,
+            'codex',
+        );
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+}
+
 export function buildResumeLaunch(session: ResumableHappySession, options: ResumeLaunchOptions = {}): ResumeLaunch {
     const { metadata } = session;
     const flavor = resolveFlavor(metadata);
@@ -54,13 +141,15 @@ export function buildResumeLaunch(session: ResumableHappySession, options: Resum
         if (!metadata.codexThreadId) {
             throw new Error(`Happy session ${session.id} is missing its Codex thread ID.`);
         }
-        const args = ['codex', '--resume', metadata.codexThreadId];
+        const codexThreadId = assertWellFormedResumeIdentifier(metadata.codexThreadId, 'Codex thread ID');
+        const args = ['codex', '--resume', codexThreadId];
         if (options.startedBy) {
             args.push('--started-by', options.startedBy);
         }
         return {
             cwd: metadata.path,
             args,
+            env: buildSandboxStateEnv(metadata),
         };
     }
 
@@ -68,6 +157,7 @@ export function buildResumeLaunch(session: ResumableHappySession, options: Resum
         if (!metadata.claudeSessionId) {
             throw new Error(`Happy session ${session.id} is missing its Claude session ID.`);
         }
+        const claudeSessionId = assertWellFormedResumeIdentifier(metadata.claudeSessionId, 'Claude session ID');
         const args = ['claude'];
         if (options.claudeStartingMode) {
             args.push('--happy-starting-mode', options.claudeStartingMode);
@@ -75,10 +165,11 @@ export function buildResumeLaunch(session: ResumableHappySession, options: Resum
         if (options.startedBy) {
             args.push('--started-by', options.startedBy);
         }
-        args.push('--resume', metadata.claudeSessionId);
+        args.push('--resume', claudeSessionId);
         return {
             cwd: metadata.path,
             args,
+            env: buildSandboxStateEnv(metadata),
         };
     }
 
@@ -105,7 +196,10 @@ function spawnResumeChild(launch: ResumeLaunch): Promise<number | null> {
     return new Promise((resolve, reject) => {
         const child = spawnHappyCLI(launch.args, {
             cwd: launch.cwd,
-            env: process.env,
+            env: {
+                ...process.env,
+                ...launch.env,
+            },
             stdio: 'inherit',
         });
 

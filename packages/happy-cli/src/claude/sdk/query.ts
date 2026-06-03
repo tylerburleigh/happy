@@ -8,6 +8,8 @@ import type { QueryOptions, QueryPrompt, SDKMessage } from './types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { ensureLocalProxyBypass } from '../utils/proxyBypass'
 import { resolveHappyEntrypoint } from './happyEntrypoint'
+import { buildSandboxedProcessEnv } from '@/sandbox/env'
+import { buildSandboxRuntimeEnv, ensureSandboxRuntimeDirsSync } from '@/sandbox/temp'
 
 /**
  * Wraps the official SDK query() with our QueryOptions adapter
@@ -40,6 +42,7 @@ export function query(params: { prompt: QueryPrompt; options?: QueryOptions }): 
         disallowedTools: opts?.disallowedTools,
         mcpServers: opts?.mcpServers as Options['mcpServers'],
         systemPrompt,
+        sandbox: opts?.sandbox,
         settings: opts?.settingsPath,
         strictMcpConfig: opts?.strictMcpConfig,
         sessionId: undefined,
@@ -60,10 +63,20 @@ export function query(params: { prompt: QueryPrompt; options?: QueryOptions }): 
     // CLAUDE_CODE_ENTRYPOINT="sdk-ts" and the picker would hide every Happy
     // session. See slopus/happy#1202.
     const env: Record<string, string> = {}
-    for (const [key, value] of Object.entries(process.env)) {
-        if (typeof value === 'string') env[key] = value
+    if (opts?.sandbox?.enabled) {
+        const sandboxSessionPath = opts.cwd ?? process.cwd()
+        ensureSandboxRuntimeDirsSync(sandboxSessionPath)
+        Object.assign(env, buildSandboxedProcessEnv(process.env, {
+            ...opts.env,
+            ...buildSandboxRuntimeEnv(sandboxSessionPath),
+        }))
     }
-    env.CLAUDE_CODE_ENTRYPOINT = resolveHappyEntrypoint(process.env.CLAUDE_CODE_ENTRYPOINT)
+    if (!opts?.sandbox?.enabled) {
+        for (const [key, value] of Object.entries({ ...process.env, ...opts?.env })) {
+            if (typeof value === 'string') env[key] = value
+        }
+    }
+    env.CLAUDE_CODE_ENTRYPOINT = resolveHappyEntrypoint(env.CLAUDE_CODE_ENTRYPOINT ?? process.env.CLAUDE_CODE_ENTRYPOINT)
     if (opts?.mcpServers && Object.keys(opts.mcpServers).length > 0) {
         ensureLocalProxyBypass(env)
     }

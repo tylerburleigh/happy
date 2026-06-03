@@ -1,5 +1,4 @@
 import fs from 'fs/promises';
-import { randomBytes } from 'node:crypto';
 import os from 'os';
 import * as tmp from 'tmp';
 import axios from 'axios';
@@ -17,7 +16,6 @@ import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquireDaemonLock, releaseDaemonLock, readPersistedSessions, persistSession } from '@/persistence';
 import type { PersistedSession } from '@/persistence';
-import { PRIVATE_FILE_MODE } from '@/utils/privateFiles';
 
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
@@ -30,6 +28,17 @@ import { detectCLIAvailability } from '@/utils/detectCLI';
 import { buildResumeLaunch } from '@/resume/handleResumeCommand';
 import { detectResumeSupport } from '@/resume/localHappyAgentAuth';
 import { encodeBase64, decodeBase64, decrypt } from '@/api/encryption';
+import { generateDaemonControlToken } from './controlAuth';
+import {
+  formatSpawnEnvironmentValidationIssues,
+  validateCallerSpawnEnvironmentVariables,
+  validateSpawnEnvironmentValues,
+} from './spawnEnv';
+import {
+  formatSpawnSessionValidationIssues,
+  validateSpawnSessionOptions,
+} from './spawnValidation';
+import { redactSpawnSessionOptionsForLog } from './spawnLogRedaction';
 
 /** Shell-escape a string for safe interpolation into tmux commands. */
 function shellescape(s: string): string {
@@ -247,9 +256,30 @@ export async function startDaemon(): Promise<void> {
 
     // Spawn a new session (sessionId reserved for future --resume functionality)
     const spawnSession = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
-      logger.debugLargeJson('[DAEMON RUN] Spawning session', options);
+      const spawnOptionValidationIssues = validateSpawnSessionOptions(options);
+      if (spawnOptionValidationIssues.length > 0) {
+        const errorMessage = `Session spawn request is invalid - ${formatSpawnSessionValidationIssues(spawnOptionValidationIssues)}.`;
+        logger.warn(`[DAEMON RUN] ${errorMessage}`);
+        return {
+          type: 'error',
+          errorMessage
+        };
+      }
+
+      const callerEnvValidationIssues = validateCallerSpawnEnvironmentVariables(options.environmentVariables);
+      if (callerEnvValidationIssues.length > 0) {
+        const errorMessage = `Session environment is invalid - ${formatSpawnEnvironmentValidationIssues(callerEnvValidationIssues)}.`;
+        logger.warn(`[DAEMON RUN] ${errorMessage}`);
+        return {
+          type: 'error',
+          errorMessage
+        };
+      }
+
+      logger.debugLargeJson('[DAEMON RUN] Spawning session', redactSpawnSessionOptionsForLog(options));
 
       const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
+      const callerEnvironmentVariables = options.environmentVariables ?? {};
       let directoryCreated = false;
 
       try {
@@ -306,10 +336,13 @@ export async function startDaemon(): Promise<void> {
           if (options.agent === 'codex') {
 
             // Create a temporary directory for Codex
-            const codexHomeDir = tmp.dirSync();
+            const codexHomeDir = tmp.dirSync({ mode: 0o700 });
 
             // Write the token to the temporary directory
-            await fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token, { mode: PRIVATE_FILE_MODE });
+            await fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token, {
+              encoding: 'utf-8',
+              mode: 0o600,
+            });
 
             // Set the environment variable for Codex
             authEnv.CODEX_HOME = codexHomeDir.name;
@@ -320,7 +353,7 @@ export async function startDaemon(): Promise<void> {
 
         let extraEnv: Record<string, string> = {
           ...authEnv,
-          ...(options.environmentVariables ?? {}),
+          ...callerEnvironmentVariables,
         };
         if (options.parentSessionId) {
           extraEnv.HAPPY_FORKED_FROM_SESSION_ID = options.parentSessionId;
@@ -342,6 +375,16 @@ export async function startDaemon(): Promise<void> {
         // Example: ANTHROPIC_AUTH_TOKEN="${Z_AI_AUTH_TOKEN}" → ANTHROPIC_AUTH_TOKEN="sk-real-key"
         extraEnv = expandEnvironmentVariables(extraEnv, process.env);
         logger.debug(`[DAEMON RUN] After variable expansion: ${Object.keys(extraEnv).join(', ')}`);
+
+        const expandedEnvValidationIssues = validateSpawnEnvironmentValues(extraEnv);
+        if (expandedEnvValidationIssues.length > 0) {
+          const errorMessage = `Session environment is invalid after expansion - ${formatSpawnEnvironmentValidationIssues(expandedEnvValidationIssues)}.`;
+          logger.warn(`[DAEMON RUN] ${errorMessage}`);
+          return {
+            type: 'error',
+            errorMessage
+          };
+        }
 
         // Fail fast if any passed-through environment variable still contains an
         // unresolved ${VAR} reference after expansion.
@@ -407,7 +450,7 @@ export async function startDaemon(): Promise<void> {
           const resumeFragment = options.resumeClaudeSessionId && agent === 'claude'
             ? ` --resume ${shellescape(options.resumeClaudeSessionId)}`
             : '';
-          const fullCommand = `node --no-warnings --no-deprecation ${cliPath} ${agent} --happy-starting-mode remote --started-by daemon${resumeFragment}`;
+          const fullCommand = `${shellescape(process.execPath)} --no-warnings --no-deprecation ${shellescape(cliPath)} ${shellescape(agent)} --happy-starting-mode remote --started-by daemon${resumeFragment}`;
 
           // Spawn in tmux with environment variables
           // IMPORTANT: Pass complete environment (process.env + extraEnv) because:
@@ -700,6 +743,7 @@ export async function startDaemon(): Promise<void> {
           cwd: launch.cwd,
           env: {
             ...process.env,
+            ...launch.env,
             HAPPY_RECONNECT_SESSION_ID: happySessionId,
             HAPPY_RECONNECT_ENCRYPTION_KEY: encodeBase64(tracked.encryption.encryptionKey),
             HAPPY_RECONNECT_ENCRYPTION_VARIANT: tracked.encryption.encryptionVariant,
@@ -766,8 +810,9 @@ export async function startDaemon(): Promise<void> {
       pidToTrackedSession.delete(pid);
     };
 
+    const controlToken = generateDaemonControlToken();
+
     // Start control server
-    const controlToken = randomBytes(32).toString('base64url');
     const { port: controlPort, stop: stopControlServer } = await startDaemonControlServer({
       controlToken,
       getChildren: getCurrentChildren,

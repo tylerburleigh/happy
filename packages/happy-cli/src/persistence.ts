@@ -6,7 +6,7 @@
 
 import { FileHandle } from 'node:fs/promises'
 import { readFile, writeFile, open, unlink, rename, stat } from 'node:fs/promises'
-import { existsSync, writeFileSync, readFileSync, unlinkSync, renameSync, chmodSync } from 'node:fs'
+import { chmodSync, existsSync, writeFileSync, readFileSync, unlinkSync, renameSync } from 'node:fs'
 import { constants } from 'node:fs'
 import { configuration } from '@/configuration'
 import * as z from 'zod';
@@ -15,52 +15,74 @@ import type { Metadata } from '@/api/types';
 import { logger } from '@/ui/logger';
 import { ensurePrivateDir, PRIVATE_FILE_MODE, writePrivateFile } from '@/utils/privateFiles';
 
-export const DEFAULT_SANDBOX_DENY_READ_PATHS = [
-  '~/.ssh',
-  '~/.aws',
-  '~/.gnupg',
-  '~/.kube',
-  '~/.docker',
-  '~/.config/gh',
-  '~/.azure',
-  '~/.npmrc',
-  '~/.pypirc',
+export const LEGACY_SANDBOX_DENY_READ_PATHS = ['~/.ssh', '~/.aws', '~/.gnupg'] as const;
+
+export const LEGACY_SANDBOX_BROAD_HAPPY_HOME_DENY_PATHS = ['~/.happy'] as const;
+
+export const DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS = [
+  '~/.happy/access.key',
+  '~/.happy/daemon.state.json',
+  '~/.happy/logs',
+  '~/.happy/server-data',
+  '~/.happy/sessions.json',
+  '~/.happy/settings.json',
+] as const;
+
+export const DEFAULT_SANDBOX_CREDENTIAL_PATHS = [
+  ...LEGACY_SANDBOX_DENY_READ_PATHS,
+  ...DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS,
   '~/.netrc',
   '~/.git-credentials',
-  '~/.terraform.d',
-  '~/Library/Keychains',
+  '~/.npmrc',
+  '~/.pypirc',
+  '~/.cargo/credentials',
+  '~/.cargo/credentials.toml',
+  '~/.docker/config.json',
+  '~/.config/containers/auth.json',
+  '~/.config/gh',
+  '~/.config/gcloud',
+  '~/.azure',
+  '~/.kube',
+  '~/.terraform.d/credentials.tfrc.json',
+] as const;
+
+export const DEFAULT_SANDBOX_SECRET_FILE_PATHS = [
   '.env',
   '.env.local',
-  '.env.*',
-];
+  '.env.development',
+  '.env.production',
+  '.env.test',
+  '.envrc',
+  '.npmrc',
+  '.pnpmrc',
+  '.yarnrc.yml',
+  '.secrets',
+  'secrets',
+] as const;
+
+export const DEFAULT_SANDBOX_DENY_READ_PATHS = [
+  ...DEFAULT_SANDBOX_CREDENTIAL_PATHS,
+  ...DEFAULT_SANDBOX_SECRET_FILE_PATHS,
+] as const;
+
+export const LEGACY_SANDBOX_DENY_WRITE_PATHS = ['.env'] as const;
 
 export const DEFAULT_SANDBOX_DENY_WRITE_PATHS = [
-  '.env',
-  '.env.local',
-  '.env.*',
-  '.happy/sandbox.json',
-  '.git/hooks',
-  '.git/config',
-  '~/.zshrc',
-  '~/.bashrc',
-  '~/.profile',
-  '~/.gitconfig',
-  '~/.git-credentials',
-  '~/.happy/settings.json',
-  '~/.happy/access.key',
-  '~/.claude/settings.json',
-  '~/.claude/settings.local.json',
-  '~/.codex/config.toml',
-];
+  ...DEFAULT_SANDBOX_SECRET_FILE_PATHS,
+  ...DEFAULT_SANDBOX_CREDENTIAL_PATHS,
+] as const;
+
+export const LEGACY_SANDBOX_EXTRA_WRITE_PATHS = ['/tmp'] as const;
+export const DEFAULT_SANDBOX_EXTRA_WRITE_PATHS = [] as const;
 
 export const SandboxConfigSchema = z.object({
   enabled: z.boolean().default(false),
   workspaceRoot: z.string().optional(),
   sessionIsolation: z.enum(['strict', 'workspace', 'custom']).default('workspace'),
   customWritePaths: z.array(z.string()).default([]),
-  denyReadPaths: z.array(z.string()).default(DEFAULT_SANDBOX_DENY_READ_PATHS),
-  extraWritePaths: z.array(z.string()).default(['/tmp']),
-  denyWritePaths: z.array(z.string()).default(DEFAULT_SANDBOX_DENY_WRITE_PATHS),
+  denyReadPaths: z.array(z.string()).default(() => [...DEFAULT_SANDBOX_DENY_READ_PATHS]),
+  extraWritePaths: z.array(z.string()).default(() => [...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]),
+  denyWritePaths: z.array(z.string()).default(() => [...DEFAULT_SANDBOX_DENY_WRITE_PATHS]),
   networkMode: z.enum(['blocked', 'allowed', 'custom']).default('allowed'),
   allowedDomains: z.array(z.string()).default([]),
   deniedDomains: z.array(z.string()).default([]),
@@ -73,6 +95,70 @@ export const SandboxConfigSchema = z.object({
 });
 
 export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
+
+function appendMissingPaths(paths: string[], defaults: readonly string[]): string[] {
+  const merged = [...paths];
+  for (const path of defaults) {
+    if (!merged.includes(path)) {
+      merged.push(path);
+    }
+  }
+  return merged;
+}
+
+function replaceBroadHappyHomeDenyDefaults(paths: string[]): string[] {
+  const broadHappyHomeDenyPaths = new Set<string>(LEGACY_SANDBOX_BROAD_HAPPY_HOME_DENY_PATHS);
+
+  if (!paths.some((path) => broadHappyHomeDenyPaths.has(path))) {
+    return paths;
+  }
+
+  return appendMissingPaths(
+    paths.filter((path) => !broadHappyHomeDenyPaths.has(path)),
+    DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS,
+  );
+}
+
+function hasSamePathSet(paths: string[], defaults: readonly string[]): boolean {
+  return paths.length === defaults.length && defaults.every((path) => paths.includes(path));
+}
+
+export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
+  const hasLegacyReadDefaults = LEGACY_SANDBOX_DENY_READ_PATHS.every((path) =>
+    config.denyReadPaths.includes(path),
+  );
+  const hasLegacyWriteDefaults = LEGACY_SANDBOX_DENY_WRITE_PATHS.every((path) =>
+    config.denyWritePaths.includes(path),
+  );
+  const hasOnlyLegacyExtraWriteDefaults = hasSamePathSet(
+    config.extraWritePaths,
+    LEGACY_SANDBOX_EXTRA_WRITE_PATHS,
+  );
+  const denyReadPaths = hasLegacyReadDefaults
+    ? replaceBroadHappyHomeDenyDefaults(appendMissingPaths(config.denyReadPaths, DEFAULT_SANDBOX_DENY_READ_PATHS))
+    : config.denyReadPaths;
+  const denyWritePaths = hasLegacyWriteDefaults
+    ? replaceBroadHappyHomeDenyDefaults(appendMissingPaths(config.denyWritePaths, DEFAULT_SANDBOX_DENY_WRITE_PATHS))
+    : config.denyWritePaths;
+  const extraWritePaths = hasOnlyLegacyExtraWriteDefaults
+    ? [...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]
+    : config.extraWritePaths;
+
+  if (
+    denyReadPaths === config.denyReadPaths
+    && denyWritePaths === config.denyWritePaths
+    && extraWritePaths === config.extraWritePaths
+  ) {
+    return config;
+  }
+
+  return {
+    ...config,
+    denyReadPaths,
+    extraWritePaths,
+    denyWritePaths,
+  };
+}
 
 // Settings schema version: Integer for overall Settings structure compatibility
 // Incremented when Settings structure changes (e.g., adding profiles array was v1→v2)
@@ -150,7 +236,9 @@ export async function readSettings(): Promise<Settings> {
 
     if (migrated.sandboxConfig !== undefined) {
       try {
-        migrated.sandboxConfig = SandboxConfigSchema.parse(migrated.sandboxConfig);
+        migrated.sandboxConfig = normalizeSandboxConfig(
+          SandboxConfigSchema.parse(migrated.sandboxConfig),
+        );
       } catch (error: any) {
         logger.warn(`⚠️ Invalid sandbox config - skipping. Error: ${error.message}`);
         migrated.sandboxConfig = undefined;
@@ -359,8 +447,16 @@ export async function readDaemonState(): Promise<DaemonLocallyPersistedState | n
  * Write daemon state to local file (synchronously for atomic operation)
  */
 export function writeDaemonState(state: DaemonLocallyPersistedState): void {
-  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), { encoding: 'utf-8', mode: PRIVATE_FILE_MODE });
-  try { chmodSync(configuration.daemonStateFile, PRIVATE_FILE_MODE); } catch { }
+  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), {
+    encoding: 'utf-8',
+    mode: PRIVATE_FILE_MODE,
+  });
+
+  try {
+    chmodSync(configuration.daemonStateFile, PRIVATE_FILE_MODE);
+  } catch (error) {
+    logger.debug('[PERSISTENCE] Failed to chmod daemon state file:', error);
+  }
 }
 
 /**

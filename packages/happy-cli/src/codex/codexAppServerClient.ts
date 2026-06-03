@@ -38,6 +38,8 @@ import type { SandboxConfig } from '@/persistence';
 import { initializeSandbox, wrapForMcpTransport } from '@/sandbox/manager';
 import { buildSandboxedProcessEnv } from '@/sandbox/env';
 import { isSandboxRuntimePlatformSupported, supportedSandboxPlatformSummary } from '@/sandbox/platform';
+import type { SandboxAgentState } from '@/sandbox/agentState';
+import { buildSandboxRuntimeEnv } from '@/sandbox/temp';
 import packageJson from '../../package.json';
 
 type PendingRequest = {
@@ -117,6 +119,7 @@ export class CodexAppServerClient {
     private processEpoch = 0;
     private connected = false;
     private sandboxConfig?: SandboxConfig;
+    private sandboxAgentState?: SandboxAgentState;
     private sandboxCleanup: (() => Promise<void>) | null = null;
     public sandboxEnabled = false;
 
@@ -149,8 +152,9 @@ export class CodexAppServerClient {
     private eventHandler: ((msg: EventMsg) => void) | null = null;
     private approvalHandler: ApprovalHandler | null = null;
 
-    constructor(sandboxConfig?: SandboxConfig) {
+    constructor(sandboxConfig?: SandboxConfig, sandboxAgentState?: SandboxAgentState) {
         this.sandboxConfig = sandboxConfig;
+        this.sandboxAgentState = sandboxAgentState;
     }
 
     get threadId(): string | null {
@@ -405,7 +409,7 @@ export class CodexAppServerClient {
             }
         } else if (this.sandboxConfig?.enabled) {
             try {
-                this.sandboxCleanup = await initializeSandbox(this.sandboxConfig, process.cwd());
+                this.sandboxCleanup = await initializeSandbox(this.sandboxConfig, process.cwd(), this.sandboxAgentState?.runtimeOptions);
                 const wrapped = await wrapForMcpTransport('codex', ['app-server', '--listen', 'stdio://']);
                 command = wrapped.command;
                 args = wrapped.args;
@@ -430,12 +434,16 @@ export class CodexAppServerClient {
 
         // Build env — same filtering as the old MCP client
         let env: Record<string, string> = {};
-        for (const [key, value] of Object.entries(process.env)) {
-            if (typeof value === 'string') env[key] = value;
-        }
         if (this.sandboxEnabled) {
-            env = buildSandboxedProcessEnv(process.env, this.sandboxConfig!, process.cwd()) as Record<string, string>;
+            env = buildSandboxedProcessEnv(process.env, {
+                ...this.sandboxAgentState?.env,
+                ...buildSandboxRuntimeEnv(process.cwd()),
+            });
             env.CODEX_SANDBOX = 'seatbelt';
+        } else {
+            for (const [key, value] of Object.entries(process.env)) {
+                if (typeof value === 'string') env[key] = value;
+            }
         }
         // Mute noisy rollout list logging
         const filter = 'codex_core::rollout::list=off';

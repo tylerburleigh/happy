@@ -16,6 +16,7 @@
 import { AcpBackend, type AcpBackendOptions, type AcpPermissionHandler } from './AcpBackend';
 import type { AgentBackend, McpServerConfig } from '../core';
 import { DefaultTransport, type TransportHandler } from '../transport';
+import type { SandboxConfig } from '@/persistence';
 
 /**
  * Simplified options for creating an ACP backend
@@ -44,6 +45,9 @@ export interface CreateAcpBackendOptions {
 
   /** Optional transport handler for agent-specific behavior */
   transportHandler?: TransportHandler;
+
+  /** Optional OS-level sandbox configuration for the spawned ACP agent. */
+  sandboxConfig?: SandboxConfig;
 }
 
 /**
@@ -80,6 +84,7 @@ export function createAcpBackend(options: CreateAcpBackendOptions): AgentBackend
     mcpServers: options.mcpServers,
     permissionHandler: options.permissionHandler,
     transportHandler: options.transportHandler ?? new DefaultTransport(options.agentName),
+    sandboxConfig: options.sandboxConfig,
   };
 
   return new AcpBackend(backendOptions);

@@ -15,6 +15,8 @@ import { initializeSandbox, wrapCommand } from "@/sandbox/manager";
 import { buildSandboxedProcessEnv } from "@/sandbox/env";
 import { isSandboxRuntimePlatformSupported, supportedSandboxPlatformSummary } from "@/sandbox/platform";
 import type { SandboxStatus } from "@/utils/createSessionMetadata";
+import { buildSandboxRuntimeEnv } from "@/sandbox/temp";
+import type { SandboxRuntimeBuildOptions } from "@/sandbox/config";
 
 /**
  * Error thrown when the Claude process exits with a non-zero exit code.
@@ -51,6 +53,7 @@ export async function claudeLocal(opts: {
     hookSettingsPath?: string,
     sandboxConfig?: SandboxConfig,
     onSandboxStatusChange?: (status: SandboxStatus) => void,
+    sandboxRuntimeOptions?: SandboxRuntimeBuildOptions,
 }) {
 
     // Ensure project directory exists
@@ -264,7 +267,7 @@ export async function claudeLocal(opts: {
             let env = {
                 ...process.env,
                 ...opts.claudeEnvVars
-            }
+            };
 
             logger.debug(`[ClaudeLocal] Spawning launcher: ${claudeCliPath}`);
             logger.debug(`[ClaudeLocal] Args: ${JSON.stringify(args)}`);
@@ -286,8 +289,11 @@ export async function claudeLocal(opts: {
                         }
                     } else {
                         try {
-                            cleanupSandbox = await initializeSandbox(opts.sandboxConfig, opts.path);
-                            env = buildSandboxedProcessEnv(process.env, opts.sandboxConfig, opts.path, opts.claudeEnvVars);
+                            cleanupSandbox = await initializeSandbox(opts.sandboxConfig, opts.path, opts.sandboxRuntimeOptions);
+                            env = buildSandboxedProcessEnv(process.env, {
+                                ...opts.claudeEnvVars,
+                                ...buildSandboxRuntimeEnv(opts.path),
+                            });
 
                             if (!spawnArgs.includes('--dangerously-skip-permissions')) {
                                 spawnArgs = [...spawnArgs, '--dangerously-skip-permissions'];

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiMachineClient } from './apiMachine';
+import { ApiMachineClient, redactRpcRequestForLog, redactSpawnSessionParamsForLog } from './apiMachine';
 import type { Machine } from './types';
 
 const {
@@ -144,5 +144,36 @@ describe('ApiMachineClient socket reconnection', () => {
         expect(mockSocket.connect).toHaveBeenCalledTimes(2);
 
         client.shutdown();
+    });
+});
+
+describe('redactSpawnSessionParamsForLog', () => {
+    it('redacts token and remote environment variable values', () => {
+        expect(redactSpawnSessionParamsForLog({
+            directory: '/tmp/repo',
+            agent: 'claude',
+            token: 'oauth-secret',
+            environmentVariables: {
+                ANTHROPIC_AUTH_TOKEN: 'api-secret',
+                'MALFORMED\nKEY': 'value',
+            },
+        })).toEqual({
+            directory: '/tmp/repo',
+            agent: 'claude',
+            token: '[redacted]',
+            environmentVariableCount: 2,
+        });
+    });
+});
+
+describe('redactRpcRequestForLog', () => {
+    it('logs only RPC method and encrypted params length', () => {
+        expect(redactRpcRequestForLog({
+            method: 'machine-1:spawn-happy-session',
+            params: 'encrypted-payload',
+        })).toEqual({
+            method: 'machine-1:spawn-happy-session',
+            paramsLength: 17,
+        });
     });
 });

@@ -969,6 +969,7 @@ export async function runGemini(opts: {
           // Pass model from message - if undefined, will use local config/env/default
           // If explicitly null, will skip local config and use env/default
           model: modelToUse,
+          sandboxConfig,
         });
         geminiBackend = backendResult.backend;
 
@@ -1024,6 +1025,7 @@ export async function runGemini(opts: {
               // Pass model from message - if undefined, will use local config/env/default
               // If explicitly null, will skip local config and use env/default
               model: modelToUse,
+              sandboxConfig,
             });
             geminiBackend = backendResult.backend;
 

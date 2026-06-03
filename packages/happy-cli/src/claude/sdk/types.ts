@@ -18,7 +18,7 @@ export type {
 export { AbortError } from '@anthropic-ai/claude-agent-sdk'
 
 // Alias for backward compatibility
-import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
+import type { CanUseTool, SandboxSettings } from '@anthropic-ai/claude-agent-sdk'
 export type CanCallToolCallback = CanUseTool
 
 /**
@@ -40,7 +40,9 @@ export interface QueryOptions {
     resume?: string
     model?: string
     fallbackModel?: string
+    env?: Record<string, string>
     strictMcpConfig?: boolean
+    sandbox?: SandboxSettings
     canCallTool?: CanCallToolCallback
     /** Path to a settings JSON file to pass to Claude via --settings */
     settingsPath?: string

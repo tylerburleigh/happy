@@ -4,20 +4,16 @@
  */
 
 import { logger } from '@/ui/logger';
-import { clearDaemonState, readDaemonState, type DaemonLocallyPersistedState } from '@/persistence';
+import { clearDaemonState, readDaemonState } from '@/persistence';
 import { Metadata } from '@/api/types';
 import { configuration } from '@/configuration';
+import { DAEMON_CONTROL_TOKEN_HEADER } from './controlAuth';
 
-function daemonControlHeaders(state: DaemonLocallyPersistedState): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Happy-Daemon-Control': 'true',
-  };
-
-  if (state.controlToken) {
-    headers.Authorization = `Bearer ${state.controlToken}`;
+function daemonControlHeaders(controlToken?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (controlToken) {
+    headers[DAEMON_CONTROL_TOKEN_HEADER] = controlToken;
   }
-
   return headers;
 }
 
@@ -45,7 +41,7 @@ async function daemonPost(path: string, body?: any): Promise<{ error?: string } 
     const timeout = process.env.HAPPY_DAEMON_HTTP_TIMEOUT ? parseInt(process.env.HAPPY_DAEMON_HTTP_TIMEOUT) : 10_000;
     const response = await fetch(`http://127.0.0.1:${state.httpPort}${path}`, {
       method: 'POST',
-      headers: daemonControlHeaders(state),
+      headers: daemonControlHeaders(state.controlToken),
       body: JSON.stringify(body || {}),
       // Mostly increased for stress test
       signal: AbortSignal.timeout(timeout)
@@ -170,7 +166,7 @@ export async function checkIfDaemonRunningAndCleanupStaleState(): Promise<boolea
     try {
       const response = await fetch(`http://127.0.0.1:${state.httpPort}/list`, {
         method: 'POST',
-        headers: daemonControlHeaders(state),
+        headers: daemonControlHeaders(state.controlToken),
         body: '{}',
         signal: AbortSignal.timeout(2000)
       });
@@ -206,11 +202,6 @@ export async function isDaemonRunningCurrentlyInstalledHappyVersion(): Promise<b
   const state = await readDaemonState();
   if (!state) {
     logger.debug('[DAEMON CONTROL] No daemon state found, returning false');
-    return false;
-  }
-
-  if (!state.controlToken) {
-    logger.debug('[DAEMON CONTROL] Running daemon state has no control token; restart required for protected control API');
     return false;
   }
   

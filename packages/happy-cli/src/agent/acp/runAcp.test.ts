@@ -267,6 +267,41 @@ describe('runAcp', () => {
     ]));
   });
 
+  it('passes configured sandbox settings to the ACP backend', async () => {
+    const sandboxConfig = {
+      enabled: true,
+      sessionIsolation: 'strict' as const,
+      customWritePaths: [],
+      denyReadPaths: ['~/.ssh'],
+      extraWritePaths: ['/tmp'],
+      denyWritePaths: ['.env'],
+      networkMode: 'blocked' as const,
+      allowedDomains: [],
+      deniedDomains: [],
+      allowLocalBinding: false,
+    };
+    mocks.mockReadSettings.mockResolvedValueOnce({
+      machineId: 'machine-1',
+      sandboxConfig,
+    } as any);
+
+    const runPromise = runAcp({
+      credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },
+      agentName: 'opencode',
+      command: 'opencode',
+      args: ['--acp'],
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.backendState.startSessionCalls).toBe(1);
+    });
+
+    await mocks.getKillHandler()!();
+    await runPromise;
+
+    expect(mocks.backendState.constructorArgs.sandboxConfig).toEqual(sandboxConfig);
+  });
+
   it('registers abort handler that cancels the ACP backend session', async () => {
     const runPromise = runAcp({
       credentials: { token: 'token', encryption: { type: 'legacy', secret: new Uint8Array(32) } },

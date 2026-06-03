@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
     DEFAULT_SANDBOX_DENY_READ_PATHS,
     DEFAULT_SANDBOX_DENY_WRITE_PATHS,
+    DEFAULT_SANDBOX_EXTRA_WRITE_PATHS,
+    DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS,
     SandboxConfigSchema,
+    normalizeSandboxConfig,
 } from './persistence';
 
 describe('SandboxConfigSchema', () => {
@@ -13,9 +16,9 @@ describe('SandboxConfigSchema', () => {
             enabled: false,
             sessionIsolation: 'workspace',
             customWritePaths: [],
-            denyReadPaths: DEFAULT_SANDBOX_DENY_READ_PATHS,
-            extraWritePaths: ['/tmp'],
-            denyWritePaths: DEFAULT_SANDBOX_DENY_WRITE_PATHS,
+            denyReadPaths: [...DEFAULT_SANDBOX_DENY_READ_PATHS],
+            extraWritePaths: [...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS],
+            denyWritePaths: [...DEFAULT_SANDBOX_DENY_WRITE_PATHS],
             networkMode: 'allowed',
             allowedDomains: [],
             deniedDomains: [],
@@ -83,5 +86,89 @@ describe('SandboxConfigSchema', () => {
                 denyReadPaths: [123],
             }),
         ).toThrow();
+    });
+});
+
+describe('normalizeSandboxConfig', () => {
+    it('adds current deny-read defaults to legacy default-derived configs', () => {
+        const parsed = SandboxConfigSchema.parse({
+            denyReadPaths: ['~/.ssh', '~/.aws', '~/.gnupg', '~/private-extra'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.denyReadPaths).toEqual(
+            expect.arrayContaining([...DEFAULT_SANDBOX_DENY_READ_PATHS, '~/private-extra']),
+        );
+    });
+
+    it('replaces broad Happy home deny defaults with sensitive Happy state paths', () => {
+        const parsed = SandboxConfigSchema.parse({
+            denyReadPaths: ['~/.ssh', '~/.aws', '~/.gnupg', '~/.happy'],
+            denyWritePaths: ['.env', '~/.happy'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.denyReadPaths).toEqual(
+            expect.arrayContaining([...DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS]),
+        );
+        expect(normalized.denyWritePaths).toEqual(
+            expect.arrayContaining([...DEFAULT_SANDBOX_HAPPY_STATE_DENY_PATHS]),
+        );
+        expect(normalized.denyReadPaths).not.toContain('~/.happy');
+        expect(normalized.denyWritePaths).not.toContain('~/.happy');
+    });
+
+    it('adds current deny-write defaults to legacy default-derived configs', () => {
+        const parsed = SandboxConfigSchema.parse({
+            denyWritePaths: ['.env', '~/write-extra'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.denyWritePaths).toEqual(
+            expect.arrayContaining([...DEFAULT_SANDBOX_DENY_WRITE_PATHS, '~/write-extra']),
+        );
+    });
+
+    it('replaces the legacy broad temp write default with the managed runtime temp default', () => {
+        const parsed = SandboxConfigSchema.parse({
+            extraWritePaths: ['/tmp'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.extraWritePaths).toEqual([...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]);
+    });
+
+    it('leaves intentionally custom deny-read paths unchanged', () => {
+        const parsed = SandboxConfigSchema.parse({
+            denyReadPaths: ['~/only-this-secret'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.denyReadPaths).toEqual(['~/only-this-secret']);
+    });
+
+    it('leaves intentionally custom deny-write paths unchanged', () => {
+        const parsed = SandboxConfigSchema.parse({
+            denyWritePaths: ['~/only-this-write-secret'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.denyWritePaths).toEqual(['~/only-this-write-secret']);
+    });
+
+    it('leaves intentionally custom extra write paths unchanged', () => {
+        const parsed = SandboxConfigSchema.parse({
+            extraWritePaths: ['/tmp', '~/scratch'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.extraWritePaths).toEqual(['/tmp', '~/scratch']);
     });
 });

@@ -33,6 +33,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RawJSONLinesSchema, type RawJSONLines } from './types';
 import { resolveSandboxConfig } from '@/sandbox/projectPolicy';
+import { createSandboxAgentState } from '@/sandbox/agentState';
 
 /** JavaScript runtime to use for spawning Claude Code */
 export type JsRuntime = 'node' | 'bun'
@@ -86,6 +87,15 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     const sandboxEnabled = Boolean(sandboxConfig?.enabled);
     const sandboxCanFallback = Boolean(sandboxConfig?.enabled && sandboxConfig.allowSandboxFallback);
     const sandboxPermissionPolicyEnabled = sandboxEnabled && !sandboxCanFallback;
+    const sandboxAgentState = sandboxEnabled
+        ? await createSandboxAgentState('claude', sessionTag)
+        : undefined;
+    const claudeEnvVars = sandboxAgentState
+        ? { ...options.claudeEnvVars, ...sandboxAgentState.env }
+        : options.claudeEnvVars;
+    if (sandboxAgentState?.env.CLAUDE_CONFIG_DIR) {
+        process.env.CLAUDE_CONFIG_DIR = sandboxAgentState.env.CLAUDE_CONFIG_DIR;
+    }
     const initialPermissionMode = applySandboxPermissionPolicy(
         resolveInitialClaudePermissionMode(options.permissionMode ?? DEFAULT_CLAUDE_PERMISSION_MODE, options.claudeArgs),
         sandboxPermissionPolicyEnabled,
@@ -130,6 +140,10 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         flavor: 'claude',
         sandbox: sandboxConfig?.enabled ? sandboxConfig : null,
         sandboxStatus: sandboxConfig?.enabled ? 'configured' : 'disabled',
+        sandboxState: sandboxAgentState ? {
+            root: sandboxAgentState.root,
+            claudeConfigDir: sandboxAgentState.env.CLAUDE_CONFIG_DIR,
+        } : null,
         dangerouslySkipPermissions,
         ...(forkedFromSessionId ? { parentSessionId: forkedFromSessionId } : {}),
         ...(forkedFromMessageId ? { forkedFromMessageId } : {}),
@@ -192,11 +206,12 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
                 onSessionFound: (id) => { offlineSessionId = id; },
                 onThinkingChange: () => {},
                 abort: new AbortController().signal,
-                claudeEnvVars: options.claudeEnvVars,
+                claudeEnvVars,
                 claudeArgs: options.claudeArgs,
                 mcpServers: {},
                 allowedTools: [],
                 sandboxConfig,
+                sandboxRuntimeOptions: sandboxAgentState?.runtimeOptions,
                 onSandboxStatusChange: (status) => {
                     metadata.sandbox = sandboxConfig?.enabled ? sandboxConfig : null;
                     metadata.sandboxStatus = status;
@@ -811,9 +826,10 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
             }
         },
         session,
-        claudeEnvVars: options.claudeEnvVars,
+        claudeEnvVars,
         claudeArgs: options.claudeArgs,
         sandboxConfig,
+        sandboxRuntimeOptions: sandboxAgentState?.runtimeOptions,
         hookSettingsPath,
         jsRuntime: options.jsRuntime
     });

@@ -321,6 +321,11 @@ export type Metadata = {
   flavor?: string
   sandbox?: SandboxConfig | null
   sandboxStatus?: 'disabled' | 'configured' | 'enforced' | 'unsupported' | 'unavailable'
+  sandboxState?: {
+    root?: string
+    claudeConfigDir?: string
+    codexHome?: string
+  } | null
   dangerouslySkipPermissions?: boolean | null
   /** Lineage for sessions created via the fork / duplicate flow. */
   parentSessionId?: string

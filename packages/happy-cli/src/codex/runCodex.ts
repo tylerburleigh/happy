@@ -41,6 +41,7 @@ import {
     evaluateShellSecurityPolicy,
     type SecurityPolicyDecision,
 } from '@/security/policy';
+import { createSandboxAgentState } from '@/sandbox/agentState';
 
 /**
  * Extracts a human-readable error from a codex task_complete/turn_aborted event.
@@ -128,6 +129,9 @@ export async function runCodex(opts: {
     const settings = await readSettings();
     let machineId = settings?.machineId;
     const sandboxConfig = opts.noSandbox ? undefined : resolveSandboxConfig(settings?.sandboxConfig, process.cwd());
+    const sandboxAgentState = sandboxConfig?.enabled
+        ? await createSandboxAgentState('codex', sessionTag)
+        : undefined;
     if (!machineId) {
         console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on https://github.com/slopus/happy-cli/issues`);
         process.exit(1);
@@ -149,6 +153,10 @@ export async function runCodex(opts: {
         startedBy: opts.startedBy,
         sandbox: sandboxConfig,
         sandboxStatus: sandboxConfig?.enabled ? 'configured' : 'disabled',
+        sandboxState: sandboxAgentState ? {
+            root: sandboxAgentState.root,
+            codexHome: sandboxAgentState.env.CODEX_HOME,
+        } : null,
         dangerouslySkipPermissions: initialPermissionMode === 'yolo' || initialPermissionMode === 'bypassPermissions',
     });
 
@@ -527,7 +535,7 @@ export async function runCodex(opts: {
     // Start Context 
     //
 
-    client = new CodexAppServerClient(sandboxConfig);
+    client = new CodexAppServerClient(sandboxConfig, sandboxAgentState);
 
     permissionHandler = new CodexPermissionHandler(session);
     // Drop any permission requests left in agent state from a previous CLI

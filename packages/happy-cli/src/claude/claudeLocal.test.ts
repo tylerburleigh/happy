@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { claudeLocal } from './claudeLocal';
 import { SandboxConfigSchema } from '@/persistence';
+import { getSandboxHomeDir, getSandboxTempDir } from '@/sandbox/temp';
 
 // Use vi.hoisted to ensure mock functions are available when vi.mock factory runs
 const {
@@ -293,6 +294,7 @@ describe('claudeLocal --continue handling', () => {
         expect(mockInitializeSandbox).toHaveBeenCalledWith(
             expect.objectContaining({ enabled: true }),
             '/tmp/workspace',
+            undefined,
         );
         expect(mockWrapCommand).toHaveBeenCalledWith(expect.stringContaining('--dangerously-skip-permissions'));
         expect(mockSpawn).toHaveBeenCalledWith(
@@ -301,6 +303,78 @@ describe('claudeLocal --continue handling', () => {
             expect.objectContaining({ shell: true, cwd: '/tmp/workspace' }),
         );
         expect(mockSandboxCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    it('filters ambient parent secrets when sandbox is enabled', async () => {
+        const originalAwsSecret = process.env.AWS_SECRET_ACCESS_KEY;
+        const originalAnthropicToken = process.env.ANTHROPIC_AUTH_TOKEN;
+
+        try {
+            process.env.AWS_SECRET_ACCESS_KEY = 'ambient-aws-secret';
+            process.env.ANTHROPIC_AUTH_TOKEN = 'ambient-anthropic-token';
+            mockBuildSandboxedProcessEnv.mockReturnValueOnce({
+                PATH: '/usr/bin',
+                ANTHROPIC_AUTH_TOKEN: 'explicit-anthropic-token',
+                HOME: getSandboxHomeDir('/tmp/workspace'),
+                TMPDIR: getSandboxTempDir('/tmp/workspace'),
+                TMP: getSandboxTempDir('/tmp/workspace'),
+                TEMP: getSandboxTempDir('/tmp/workspace'),
+            });
+
+            await claudeLocal({
+                abort: new AbortController().signal,
+                sessionId: null,
+                path: '/tmp/workspace',
+                onSessionFound,
+                claudeArgs: [],
+                claudeEnvVars: {
+                    ANTHROPIC_AUTH_TOKEN: 'explicit-anthropic-token',
+                    HOME: '/home/unsafe',
+                    TMPDIR: '/tmp/unsafe',
+                },
+                sandboxConfig: SandboxConfigSchema.parse({
+                    enabled: true,
+                    workspaceRoot: '~/projects',
+                    sessionIsolation: 'workspace',
+                    customWritePaths: [],
+                    denyReadPaths: ['~/.ssh'],
+                    extraWritePaths: ['/tmp'],
+                    denyWritePaths: ['.env'],
+                    networkMode: 'allowed',
+                    allowedDomains: [],
+                    deniedDomains: [],
+                    allowLocalBinding: true,
+                }),
+            });
+
+            const env = mockSpawn.mock.calls[0][2].env;
+            expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+            expect(env.ANTHROPIC_AUTH_TOKEN).toBe('explicit-anthropic-token');
+            expect(env.HOME).toBe(getSandboxHomeDir('/tmp/workspace'));
+            expect(env.TMPDIR).toBe(getSandboxTempDir('/tmp/workspace'));
+            expect(env.TMP).toBe(getSandboxTempDir('/tmp/workspace'));
+            expect(env.TEMP).toBe(getSandboxTempDir('/tmp/workspace'));
+            expect(mockBuildSandboxedProcessEnv).toHaveBeenCalledWith(
+                process.env,
+                expect.objectContaining({
+                    ANTHROPIC_AUTH_TOKEN: 'explicit-anthropic-token',
+                    HOME: getSandboxHomeDir('/tmp/workspace'),
+                    TMPDIR: getSandboxTempDir('/tmp/workspace'),
+                }),
+            );
+        } finally {
+            if (originalAwsSecret === undefined) {
+                delete process.env.AWS_SECRET_ACCESS_KEY;
+            } else {
+                process.env.AWS_SECRET_ACCESS_KEY = originalAwsSecret;
+            }
+
+            if (originalAnthropicToken === undefined) {
+                delete process.env.ANTHROPIC_AUTH_TOKEN;
+            } else {
+                process.env.ANTHROPIC_AUTH_TOKEN = originalAnthropicToken;
+            }
+        }
     });
 
     it('should fail closed when sandbox initialization fails', async () => {

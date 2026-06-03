@@ -3,8 +3,7 @@
  * Provides endpoints for listing sessions, stopping sessions, and daemon shutdown
  */
 
-import { timingSafeEqual } from 'node:crypto';
-import fastify from 'fastify';
+import fastify, { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { logger } from '@/ui/logger';
@@ -12,10 +11,10 @@ import { Metadata } from '@/api/types';
 import { decodeBase64 } from '@/api/encryption';
 import { TrackedSession, SessionEncryptionData } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
+import { DAEMON_CONTROL_TOKEN_HEADER, isValidDaemonControlToken } from './controlAuth';
+import { validateCallerSpawnEnvironmentVariables } from './spawnEnv';
 
-const DAEMON_CONTROL_HEADER = 'x-happy-daemon-control';
-
-type DaemonControlServerOptions = {
+export type DaemonControlServerOptions = {
   controlToken: string;
   getChildren: () => TrackedSession[];
   stopSession: (sessionId: string) => boolean;
@@ -24,47 +23,77 @@ type DaemonControlServerOptions = {
   onHappySessionWebhook: (sessionId: string, metadata: Metadata, encryption?: SessionEncryptionData) => void;
 };
 
-export function createDaemonControlServer({
+const MAX_CONTROL_STRING_LENGTH = 4096;
+const MAX_ENCRYPTION_KEY_LENGTH = 4096;
+
+const controlStringSchema = z.string()
+  .min(1)
+  .max(MAX_CONTROL_STRING_LENGTH)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'must not contain control characters');
+
+const encryptionKeySchema = z.string()
+  .min(1)
+  .max(MAX_ENCRYPTION_KEY_LENGTH)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), 'must not contain control characters')
+  .refine(
+    (value) => value.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(value),
+    'must be standard base64',
+  );
+
+const controlVersionSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+const sessionStartedMetadataSchema = z.record(z.string(), z.unknown());
+
+const environmentVariablesSchema = z.record(z.string(), z.string()).superRefine((env, ctx) => {
+  for (const issue of validateCallerSpawnEnvironmentVariables(env)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: issue.key ? [issue.key] : [],
+      message: issue.message,
+    });
+  }
+});
+
+export function createDaemonControlServerApp({
   controlToken,
   getChildren,
   stopSession,
   spawnSession,
   requestShutdown,
   onHappySessionWebhook
-}: DaemonControlServerOptions) {
-  const app = fastify({
-    logger: false // We use our own logger
-  });
+}: DaemonControlServerOptions): FastifyInstance {
+    const app = fastify({
+      logger: false, // We use our own logger
+      bodyLimit: 1024 * 1024,
+    });
 
-  // Set up Zod type provider
-  app.setValidatorCompiler(validatorCompiler);
-  app.setSerializerCompiler(serializerCompiler);
-  const typed = app.withTypeProvider<ZodTypeProvider>();
+    // Set up Zod type provider
+    app.setValidatorCompiler(validatorCompiler);
+    app.setSerializerCompiler(serializerCompiler);
+    const typed = app.withTypeProvider<ZodTypeProvider>();
 
-  typed.addHook('preHandler', async (request, reply) => {
-    if (!isValidBearerToken(request.headers.authorization, controlToken)) {
-      logger.debug(`[CONTROL SERVER] Rejected unauthorized request: ${request.method} ${request.url}`);
-      return reply.code(401).send({ error: 'Unauthorized' });
-    }
+    app.addHook('preHandler', async (request, reply) => {
+      const headerValue = request.headers[DAEMON_CONTROL_TOKEN_HEADER];
+      const providedToken = Array.isArray(headerValue) ? headerValue[0] : headerValue;
 
-    if (request.headers[DAEMON_CONTROL_HEADER] !== 'true') {
-      logger.debug(`[CONTROL SERVER] Rejected request missing daemon control header: ${request.method} ${request.url}`);
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
-  });
+      if (!isValidDaemonControlToken(providedToken, controlToken)) {
+        logger.debug(`[CONTROL SERVER] Unauthorized request: ${request.method} ${request.url}`);
+        return reply.code(401).send({ error: 'Unauthorized' });
+      }
+    });
 
     // Session reports itself after creation
     typed.post('/session-started', {
       schema: {
         body: z.object({
-          sessionId: z.string(),
-          metadata: z.any(),
+          sessionId: controlStringSchema,
+          metadata: sessionStartedMetadataSchema,
           encryption: z.object({
-            encryptionKey: z.string(),
+            encryptionKey: encryptionKeySchema,
             encryptionVariant: z.enum(['legacy', 'dataKey']),
-            seq: z.number(),
-            metadataVersion: z.number(),
-            agentStateVersion: z.number(),
+            seq: controlVersionSchema,
+            metadataVersion: controlVersionSchema,
+            agentStateVersion: controlVersionSchema,
           }).optional()
         }),
         response: {
@@ -89,7 +118,7 @@ export function createDaemonControlServer({
         };
       }
 
-      onHappySessionWebhook(sessionId, metadata, encryptionData);
+      onHappySessionWebhook(sessionId, metadata as Metadata, encryptionData);
 
       return { status: 'ok' as const };
     });
@@ -125,7 +154,7 @@ export function createDaemonControlServer({
     typed.post('/stop-session', {
       schema: {
         body: z.object({
-          sessionId: z.string()
+          sessionId: controlStringSchema
         }),
         response: {
           200: z.object({
@@ -145,10 +174,10 @@ export function createDaemonControlServer({
     typed.post('/spawn-session', {
       schema: {
         body: z.object({
-          directory: z.string(),
-          sessionId: z.string().optional(),
+          directory: controlStringSchema,
+          sessionId: controlStringSchema.optional(),
           agent: z.enum(['claude', 'codex', 'gemini', 'openclaw']).optional(),
-          environmentVariables: z.record(z.string(), z.string()).optional(),
+          environmentVariables: environmentVariablesSchema.optional(),
         }),
         response: {
           200: z.object({
@@ -229,17 +258,18 @@ export function createDaemonControlServer({
       return { status: 'stopping' };
     });
 
-  return app;
+    return app;
 }
 
 export function startDaemonControlServer(options: DaemonControlServerOptions): Promise<{ port: number; stop: () => Promise<void> }> {
-  return new Promise((resolve) => {
-    const app = createDaemonControlServer(options);
+  return new Promise((resolve, reject) => {
+    const app = createDaemonControlServerApp(options);
 
     app.listen({ port: 0, host: '127.0.0.1' }, (err, address) => {
       if (err) {
         logger.debug('[CONTROL SERVER] Failed to start:', err);
-        throw err;
+        reject(err);
+        return;
       }
 
       const port = parseInt(address.split(':').pop()!);
@@ -255,17 +285,4 @@ export function startDaemonControlServer(options: DaemonControlServerOptions): P
       });
     });
   });
-}
-
-function isValidBearerToken(authHeader: string | undefined, controlToken: string): boolean {
-  const prefix = 'Bearer ';
-  if (!authHeader?.startsWith(prefix)) {
-    return false;
-  }
-
-  const providedToken = authHeader.slice(prefix.length);
-  const providedBuffer = Buffer.from(providedToken);
-  const expectedBuffer = Buffer.from(controlToken);
-
-  return providedBuffer.length === expectedBuffer.length && timingSafeEqual(providedBuffer, expectedBuffer);
 }

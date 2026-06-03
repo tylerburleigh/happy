@@ -12,11 +12,13 @@ const {
     mockWrapWithSandbox,
     mockReset,
     mockBuildSandboxRuntimeConfig,
+    mockEnsureSandboxRuntimeDirs,
 } = vi.hoisted(() => ({
     mockInitialize: vi.fn(),
     mockWrapWithSandbox: vi.fn(),
     mockReset: vi.fn(),
     mockBuildSandboxRuntimeConfig: vi.fn(),
+    mockEnsureSandboxRuntimeDirs: vi.fn(),
 }));
 
 vi.mock('@anthropic-ai/sandbox-runtime', () => ({
@@ -29,6 +31,10 @@ vi.mock('@anthropic-ai/sandbox-runtime', () => ({
 
 vi.mock('./config', () => ({
     buildSandboxRuntimeConfig: mockBuildSandboxRuntimeConfig,
+}));
+
+vi.mock('./temp', () => ({
+    ensureSandboxRuntimeDirs: mockEnsureSandboxRuntimeDirs,
 }));
 
 describe('sandbox manager', () => {
@@ -49,6 +55,7 @@ describe('sandbox manager', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mockBuildSandboxRuntimeConfig.mockReturnValue(runtimeConfig);
+        mockEnsureSandboxRuntimeDirs.mockResolvedValue(undefined);
         mockWrapWithSandbox.mockResolvedValue('sandbox wrapped command');
     });
 
@@ -68,7 +75,8 @@ describe('sandbox manager', () => {
 
         const cleanup = await initializeSandbox(sandboxConfig, '/workspace/session');
 
-        expect(mockBuildSandboxRuntimeConfig).toHaveBeenCalledWith(sandboxConfig, '/workspace/session');
+        expect(mockEnsureSandboxRuntimeDirs).toHaveBeenCalledWith('/workspace/session');
+        expect(mockBuildSandboxRuntimeConfig).toHaveBeenCalledWith(sandboxConfig, '/workspace/session', undefined);
         expect(mockInitialize).toHaveBeenCalledWith(runtimeConfig);
 
         await cleanup();
@@ -101,24 +109,36 @@ describe('sandbox manager', () => {
         expect(wrapped).toBe('sandbox wrapped command');
     });
 
-    it('wrapForMcpTransport returns sh -c wrapped command', async () => {
+    it('wrapForMcpTransport returns /bin/sh -c wrapped command', async () => {
         mockWrapWithSandbox.mockResolvedValue('sandbox codex command');
 
         const wrapped = await wrapForMcpTransport('codex', ['mcp-server']);
 
-        expect(mockWrapWithSandbox).toHaveBeenCalledWith('codex mcp-server');
+        expect(mockWrapWithSandbox).toHaveBeenCalledWith("'codex' 'mcp-server'");
         expect(wrapped).toEqual({
-            command: 'sh',
+            command: '/bin/sh',
             args: ['-c', 'sandbox codex command'],
         });
     });
 
-    it('quotes MCP transport arguments before wrapping', async () => {
+    it('shell-quotes MCP transport command arguments before wrapping', async () => {
         mockWrapWithSandbox.mockResolvedValue('sandbox quoted command');
 
-        await wrapForMcpTransport('custom cmd', ['--flag', 'value with spaces']);
+        await wrapForMcpTransport('/path with spaces/tool', ['--name', "it's fine"]);
 
-        expect(mockWrapWithSandbox).toHaveBeenCalledWith("'custom cmd' --flag 'value with spaces'");
+        expect(mockWrapWithSandbox).toHaveBeenCalledWith("'/path with spaces/tool' '--name' 'it'\\''s fine'");
+    });
+
+    it('rejects empty MCP transport commands before wrapping', async () => {
+        await expect(wrapForMcpTransport('', [])).rejects.toThrow('Sandbox MCP command may not be empty');
+
+        expect(mockWrapWithSandbox).not.toHaveBeenCalled();
+    });
+
+    it('rejects MCP transport command parts with control characters before wrapping', async () => {
+        await expect(wrapForMcpTransport('codex', ['mcp\nserver'])).rejects.toThrow('Sandbox MCP command may not contain control characters');
+
+        expect(mockWrapWithSandbox).not.toHaveBeenCalled();
     });
 
 });

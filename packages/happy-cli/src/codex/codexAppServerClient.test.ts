@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SandboxConfigSchema, type SandboxConfig } from '@/persistence';
+import { getSandboxHomeDir, getSandboxTempDir } from '@/sandbox/temp';
 
 const {
     mockExecSync,
@@ -125,12 +126,24 @@ const sandboxConfig: SandboxConfig = SandboxConfigSchema.parse({
     allowLocalBinding: true,
 });
 
+function restoreEnvVar(key: string, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[key];
+    } else {
+        process.env[key] = value;
+    }
+}
+
 describe('CodexAppServerClient sandbox integration', () => {
     const originalRustLog = process.env.RUST_LOG;
+    const originalAwsSecret = process.env.AWS_SECRET_ACCESS_KEY;
+    const originalOpenAiKey = process.env.OPENAI_API_KEY;
 
     beforeEach(() => {
         vi.clearAllMocks();
-        process.env.RUST_LOG = originalRustLog;
+        restoreEnvVar('RUST_LOG', originalRustLog);
+        restoreEnvVar('AWS_SECRET_ACCESS_KEY', originalAwsSecret);
+        restoreEnvVar('OPENAI_API_KEY', originalOpenAiKey);
         mockExecSync.mockReturnValue('codex-cli 0.107.0');
         mockInitializeSandbox.mockResolvedValue(mockSandboxCleanup);
         mockWrapForMcpTransport.mockResolvedValue({ command: 'sh', args: ['-c', 'wrapped codex app-server'] });
@@ -144,7 +157,9 @@ describe('CodexAppServerClient sandbox integration', () => {
     });
 
     afterAll(() => {
-        process.env.RUST_LOG = originalRustLog;
+        restoreEnvVar('RUST_LOG', originalRustLog);
+        restoreEnvVar('AWS_SECRET_ACCESS_KEY', originalAwsSecret);
+        restoreEnvVar('OPENAI_API_KEY', originalOpenAiKey);
     });
 
     it('wraps transport when sandbox is enabled', async () => {
@@ -154,7 +169,7 @@ describe('CodexAppServerClient sandbox integration', () => {
 
         await client.connect();
 
-        expect(mockInitializeSandbox).toHaveBeenCalledWith(sandboxConfig, process.cwd());
+        expect(mockInitializeSandbox).toHaveBeenCalledWith(sandboxConfig, process.cwd(), undefined);
         expect(mockWrapForMcpTransport).toHaveBeenCalledWith('codex', ['app-server', '--listen', 'stdio://']);
         expect(mockSpawn).toHaveBeenCalledWith(
             'sh',
@@ -249,6 +264,71 @@ describe('CodexAppServerClient sandbox integration', () => {
                 }),
             }),
         );
+
+        await client.disconnect();
+    });
+
+    it('filters ambient parent secrets when sandbox is enabled', async () => {
+        process.env.AWS_SECRET_ACCESS_KEY = 'ambient-aws-secret';
+        process.env.OPENAI_API_KEY = 'ambient-openai-key';
+        mockBuildSandboxedProcessEnv.mockReturnValueOnce({
+            PATH: '/usr/bin',
+            HOME: getSandboxHomeDir(process.cwd()),
+            TMPDIR: getSandboxTempDir(process.cwd()),
+            TMP: getSandboxTempDir(process.cwd()),
+            TEMP: getSandboxTempDir(process.cwd()),
+        });
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient(sandboxConfig);
+
+        await client.connect();
+
+        const env = mockSpawn.mock.calls[0][2].env;
+        expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+        expect(env.OPENAI_API_KEY).toBeUndefined();
+        expect(env.CODEX_SANDBOX).toBe('seatbelt');
+        expect(env.HOME).toBe(getSandboxHomeDir(process.cwd()));
+        expect(env.TMPDIR).toBe(getSandboxTempDir(process.cwd()));
+        expect(env.TMP).toBe(getSandboxTempDir(process.cwd()));
+        expect(env.TEMP).toBe(getSandboxTempDir(process.cwd()));
+        expect(mockBuildSandboxedProcessEnv).toHaveBeenCalledWith(
+            process.env,
+            expect.objectContaining({
+                HOME: getSandboxHomeDir(process.cwd()),
+                TMPDIR: getSandboxTempDir(process.cwd()),
+            }),
+        );
+
+        await client.disconnect();
+    });
+
+    it('uses isolated sandbox agent state when provided', async () => {
+        const sandboxAgentState = {
+            root: '/tmp/happy-sandbox-state/session-1',
+            env: {
+                CODEX_HOME: '/tmp/happy-sandbox-state/session-1/codex',
+            },
+            runtimeOptions: {
+                agentStatePaths: ['/tmp/happy-sandbox-state/session-1', '/tmp/happy-sandbox-state/session-1/codex'],
+                denyReadPaths: ['/home/test/.codex'],
+                includeSharedAgentStatePaths: false,
+            },
+        };
+        mockBuildSandboxedProcessEnv.mockReturnValueOnce({
+            PATH: '/usr/bin',
+            CODEX_HOME: sandboxAgentState.env.CODEX_HOME,
+        });
+        const { CodexAppServerClient } = await import('./codexAppServerClient');
+        const client = new CodexAppServerClient(sandboxConfig, sandboxAgentState);
+
+        await client.connect();
+
+        expect(mockInitializeSandbox).toHaveBeenCalledWith(
+            sandboxConfig,
+            process.cwd(),
+            sandboxAgentState.runtimeOptions,
+        );
+        expect(mockSpawn.mock.calls[0][2].env.CODEX_HOME).toBe('/tmp/happy-sandbox-state/session-1/codex');
 
         await client.disconnect();
     });

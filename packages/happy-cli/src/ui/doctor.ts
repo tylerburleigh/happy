@@ -45,6 +45,17 @@ export function getEnvironmentInfo(): Record<string, any> {
     };
 }
 
+function formatDaemonStateForDisplay(state: Awaited<ReturnType<typeof readDaemonState>>): string {
+    if (!state) {
+        return 'null';
+    }
+
+    return JSON.stringify({
+        ...state,
+        controlToken: state.controlToken ? '[redacted]' : undefined,
+    }, null, 2);
+}
+
 function getLogFiles(logDir: string): { file: string, path: string, modified: Date }[] {
     if (!existsSync(logDir)) {
         return [];
@@ -88,7 +99,7 @@ export async function runDoctorDaemon(): Promise<void> {
         if (state) {
             console.log(chalk.bold('\n📄 Daemon State:'));
             console.log(chalk.blue(`Location: ${configuration.daemonStateFile}`));
-            console.log(chalk.gray(JSON.stringify(state, null, 2)));
+            console.log(chalk.gray(formatDaemonStateForDisplay(state)));
         }
     } catch (error) {
         console.log(chalk.red('❌ Error checking daemon status'));
@@ -272,7 +283,7 @@ export async function runDoctorCommand(): Promise<void> {
         if (state) {
             console.log(chalk.bold('\n📄 Daemon State:'));
             console.log(chalk.blue(`Location: ${configuration.daemonStateFile}`));
-            console.log(chalk.gray(JSON.stringify(state, null, 2)));
+            console.log(chalk.gray(formatDaemonStateForDisplay(state)));
         }
     } catch (error) {
         console.log(chalk.red('❌ Error checking daemon status'));

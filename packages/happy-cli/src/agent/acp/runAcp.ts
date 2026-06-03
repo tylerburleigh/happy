@@ -555,6 +555,7 @@ export async function runAcp(opts: {
     permissionHandler,
     transportHandler: new DefaultTransport(opts.agentName),
     verbose,
+    sandboxConfig: settings.sandboxConfig,
   });
 
   let thinking = false;

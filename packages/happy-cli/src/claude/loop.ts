@@ -8,6 +8,7 @@ import { ApiClient } from "@/lib"
 import type { JsRuntime } from "./runClaude"
 import type { SandboxConfig } from "@/persistence"
 import type { SandboxStatus } from "@/utils/createSessionMetadata"
+import type { SandboxRuntimeBuildOptions } from "@/sandbox/config"
 
 // Re-export permission mode type from api/types
 // Single unified type with 7 modes - Codex modes mapped at SDK boundary
@@ -43,6 +44,7 @@ interface LoopOptions {
     allowedTools?: string[]
     sandboxConfig?: SandboxConfig
     onSandboxStatusChange?: (status: SandboxStatus) => void
+    sandboxRuntimeOptions?: SandboxRuntimeBuildOptions
     onSessionReady?: (session: Session) => void
     onAbort?: () => void
     /** Path to temporary settings file with SessionStart hook (required for session tracking) */
@@ -68,6 +70,7 @@ export async function loop(opts: LoopOptions): Promise<number> {
         allowedTools: opts.allowedTools,
         sandboxConfig: opts.sandboxConfig,
         onSandboxStatusChange: opts.onSandboxStatusChange,
+        sandboxRuntimeOptions: opts.sandboxRuntimeOptions,
         onModeChange: opts.onModeChange,
         onAbort: opts.onAbort,
         hookSettingsPath: opts.hookSettingsPath,

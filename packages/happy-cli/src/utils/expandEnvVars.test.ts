@@ -13,6 +13,7 @@ vi.mock('@/ui/logger', () => ({
     }
 }));
 
+import { logger } from '@/ui/logger';
 import { expandEnvironmentVariables } from './expandEnvVars';
 
 describe('expandEnvironmentVariables', () => {
@@ -71,6 +72,30 @@ describe('expandEnvironmentVariables', () => {
         expect(result).toEqual({
             ANTHROPIC_AUTH_TOKEN: 'sk-ant-real-key-12345'
         });
+    });
+
+    it('should not log expanded environment values or defaults verbatim', () => {
+        vi.mocked(logger.debug).mockClear();
+
+        const result = expandEnvironmentVariables(
+            {
+                HEADER: '${AUTH_HEADER}',
+                FALLBACK: '${MISSING_HEADER:-Bearer default-secret}',
+            },
+            {
+                AUTH_HEADER: 'Bearer real-secret',
+            },
+        );
+
+        expect(result).toEqual({
+            HEADER: 'Bearer real-secret',
+            FALLBACK: 'Bearer default-secret',
+        });
+        const debugOutput = vi.mocked(logger.debug).mock.calls.map((args) => args.join(' ')).join('\n');
+        expect(debugOutput).not.toContain('Bearer real-secret');
+        expect(debugOutput).not.toContain('Bearer default-secret');
+        expect(debugOutput).toContain('<18 chars>');
+        expect(debugOutput).toContain('<21 chars>');
     });
 
     it('should preserve values without ${VAR} references', () => {

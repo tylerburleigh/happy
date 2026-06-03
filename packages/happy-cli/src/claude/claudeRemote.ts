@@ -12,6 +12,37 @@ import { awaitFileExist } from "@/modules/watcher/awaitFileExist";
 import { systemPrompt } from "./utils/systemPrompt";
 import { PermissionResult } from "./sdk/types";
 import type { JsRuntime } from "./runClaude";
+import type { SandboxConfig } from "@/persistence";
+import { buildSandboxRuntimeConfig, type SandboxRuntimeBuildOptions } from "@/sandbox/config";
+
+function buildClaudeSdkSandboxSettings(
+    sandboxConfig: SandboxConfig | undefined,
+    sessionPath: string,
+    sandboxRuntimeOptions?: SandboxRuntimeBuildOptions,
+): QueryOptions['sandbox'] | undefined {
+    if (!sandboxConfig?.enabled) {
+        return undefined;
+    }
+
+    const runtimeConfig = buildSandboxRuntimeConfig(sandboxConfig, sessionPath, sandboxRuntimeOptions);
+
+    return {
+        enabled: true,
+        failIfUnavailable: true,
+        autoAllowBashIfSandboxed: true,
+        allowUnsandboxedCommands: false,
+        network: {
+            ...(runtimeConfig.network?.allowedDomains === undefined ? {} : { allowedDomains: runtimeConfig.network.allowedDomains }),
+            allowLocalBinding: runtimeConfig.network?.allowLocalBinding,
+        },
+        filesystem: {
+            allowWrite: runtimeConfig.filesystem?.allowWrite,
+            denyWrite: runtimeConfig.filesystem?.denyWrite,
+            denyRead: runtimeConfig.filesystem?.denyRead,
+        },
+        enableWeakerNetworkIsolation: runtimeConfig.enableWeakerNetworkIsolation,
+    };
+}
 
 export async function claudeRemote(opts: {
 
@@ -30,6 +61,8 @@ export async function claudeRemote(opts: {
     hookSettingsPath: string,
     /** JavaScript runtime to use for spawning Claude Code (default: 'node') */
     jsRuntime?: JsRuntime,
+    sandboxConfig?: SandboxConfig,
+    sandboxRuntimeOptions?: SandboxRuntimeBuildOptions,
 
     // Dynamic parameters
     nextMessage: () => Promise<{ message: MessageParam['content'], mode: EnhancedMode } | null>,
@@ -75,13 +108,6 @@ export async function claudeRemote(opts: {
                 }
             }
         }
-    }
-
-    // Set environment variables for Claude Code SDK
-    if (opts.claudeEnvVars) {
-        Object.entries(opts.claudeEnvVars).forEach(([key, value]) => {
-            process.env[key] = value;
-        });
     }
 
     // Get initial message
@@ -134,6 +160,8 @@ export async function claudeRemote(opts: {
         canCallTool: (toolName: string, input: unknown, options: { signal: AbortSignal; toolUseID: string }) => opts.canCallTool(toolName, input, mode, options),
         abort: opts.signal,
         settingsPath: opts.hookSettingsPath,
+        sandbox: buildClaudeSdkSandboxSettings(opts.sandboxConfig, opts.path, opts.sandboxRuntimeOptions),
+        env: opts.claudeEnvVars,
     }
 
     // Track thinking state

@@ -67,6 +67,10 @@ happy codex
 
 On your computer, run `happy` instead of `claude` or `happy codex` instead of `codex` to start your AI through our wrapper. When you want to control your coding agent from your phone, it restarts the session in remote mode. To switch back to your computer, just press any key on your keyboard.
 
+## Security & Sandboxing
+
+Happy supports an experimental OS-level sandbox for agent sessions. The sandbox hardening work includes isolated per-session provider state, managed sandbox home/temp directories, stricter filesystem and network policy validation, filtered agent environments, authenticated daemon control endpoints, and redacted control-plane logging. See the [Happy CLI README](packages/happy-cli/README.md#sandbox-experimental) for usage and the [egress proxy and credential broker plan](docs/plans/happy-egress-proxy-and-credential-broker.md) for the next planned security layer.
+
 ## 🔥 Why Happy Coder?
 
 - 📱 **Mobile access to Claude Code and Codex** - Check what your AI is building while away from your desk

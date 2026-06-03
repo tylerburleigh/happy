@@ -78,7 +78,7 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
   } else {
     directory = process.cwd()
   }
-  // Note: We're actually executing 'node' with the calculated entrypoint path below,
+  // Note: We're actually executing the current JS runtime with the calculated entrypoint path below,
   // bypassing the 'happy' wrapper that would normally be found in the shell's PATH.
   // However, we log it as 'happy' here because other engineers are typically looking
   // for when "happy" was started and don't care about the underlying node process
@@ -101,11 +101,9 @@ export function spawnHappyCLI(args: string[], options: SpawnOptions = {}): Child
     throw new Error(errorMessage);
   }
   
-  const runtime = isBun() ? 'bun' : 'node';
-  // Use cross-spawn so `node` resolves to `node.exe` on Windows.
-  // Since Node's CVE-2024-27980 hardening, child_process.spawn('node', ...)
-  // on Windows no longer falls back to appending `.exe`, producing ENOENT
-  // even when node is on PATH (issue #1082).
+  const runtime = process.execPath || (isBun() ? 'bun' : 'node');
+  // Prefer process.execPath so daemon-spawned children do not resolve the runtime through PATH.
+  // Keep cross-spawn for consistent Windows process creation and argument handling.
   return crossSpawn(runtime, nodeArgs, {
     windowsHide: true,
     ...options,

@@ -45,7 +45,17 @@ describe('ensureLocalProxyBypass', () => {
     it('handles whitespace in existing entries', () => {
         const env: Record<string, string | undefined> = { NO_PROXY: ' 127.0.0.1 , localhost , ::1 ' }
         ensureLocalProxyBypass(env)
-        expect(env.NO_PROXY).toBe(' 127.0.0.1 , localhost , ::1 ')
+        expect(env.NO_PROXY).toBe('127.0.0.1,localhost,::1')
+        expect(env.no_proxy).toBe('127.0.0.1,localhost,::1')
+    })
+
+    it('dedupes entries and drops entries with control characters', () => {
+        const env: Record<string, string | undefined> = {
+            NO_PROXY: 'internal.corp,internal.corp,bad\nentry',
+        }
+        ensureLocalProxyBypass(env)
+        expect(env.NO_PROXY).toBe('internal.corp,127.0.0.1,localhost,::1')
+        expect(env.no_proxy).toBe('internal.corp,127.0.0.1,localhost,::1')
     })
 
     it('appends only ::1 when IPv4 loopback entries already present', () => {

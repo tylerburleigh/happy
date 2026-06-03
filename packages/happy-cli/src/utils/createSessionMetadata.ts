@@ -36,6 +36,8 @@ export interface CreateSessionMetadataOptions {
     sandbox?: SandboxConfig;
     /** Actual sandbox enforcement state. Configured is not equivalent to enforced. */
     sandboxStatus?: SandboxStatus;
+    /** Happy-owned isolated provider state for sandboxed sessions */
+    sandboxState?: Metadata['sandboxState'];
     /** Whether the backend runs with "dangerously skip permissions" behavior */
     dangerouslySkipPermissions?: boolean;
 }
@@ -96,6 +98,7 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         flavor: opts.flavor,
         sandbox: opts.sandbox?.enabled ? opts.sandbox : null,
         sandboxStatus,
+        sandboxState: opts.sandboxState ?? null,
         dangerouslySkipPermissions: opts.dangerouslySkipPermissions ?? null,
     };
 

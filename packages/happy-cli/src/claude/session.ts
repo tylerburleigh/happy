@@ -5,6 +5,7 @@ import { logger } from "@/ui/logger";
 import type { JsRuntime } from "./runClaude";
 import type { SandboxConfig } from "@/persistence";
 import type { SandboxStatus } from "@/utils/createSessionMetadata";
+import type { SandboxRuntimeBuildOptions } from "@/sandbox/config";
 
 export class Session {
     readonly path: string;
@@ -18,6 +19,7 @@ export class Session {
     readonly allowedTools?: string[];
     readonly sandboxConfig?: SandboxConfig;
     readonly onSandboxStatusChange?: (status: SandboxStatus) => void;
+    readonly sandboxRuntimeOptions?: SandboxRuntimeBuildOptions;
     readonly _onModeChange: (mode: 'local' | 'remote') => void;
     readonly _onAbort?: () => void;
     /** Path to temporary settings file with SessionStart hook (required for session tracking) */
@@ -50,6 +52,7 @@ export class Session {
         allowedTools?: string[],
         sandboxConfig?: SandboxConfig,
         onSandboxStatusChange?: (status: SandboxStatus) => void,
+        sandboxRuntimeOptions?: SandboxRuntimeBuildOptions,
         /** Path to temporary settings file with SessionStart hook (required for session tracking) */
         hookSettingsPath: string,
         /** JavaScript runtime to use for spawning Claude Code (default: 'node') */
@@ -67,6 +70,7 @@ export class Session {
         this.allowedTools = opts.allowedTools;
         this.sandboxConfig = opts.sandboxConfig;
         this.onSandboxStatusChange = opts.onSandboxStatusChange;
+        this.sandboxRuntimeOptions = opts.sandboxRuntimeOptions;
         this._onModeChange = opts.onModeChange;
         this._onAbort = opts.onAbort;
         this.hookSettingsPath = opts.hookSettingsPath;

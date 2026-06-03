@@ -24,6 +24,40 @@ import {
 } from '@/claude/utils/claudeSessionFork';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REDACTED = '[redacted]';
+
+export function redactSpawnSessionParamsForLog(params: unknown): Record<string, unknown> {
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+        return { invalidParamsType: typeof params };
+    }
+
+    const {
+        environmentVariables,
+        token,
+        ...safeParams
+    } = params as Record<string, unknown>;
+    const environmentVariableCount = environmentVariables && typeof environmentVariables === 'object' && !Array.isArray(environmentVariables)
+        ? Object.keys(environmentVariables).length
+        : undefined;
+
+    return {
+        ...safeParams,
+        token: typeof token === 'string' && token.length > 0 ? REDACTED : undefined,
+        environmentVariableCount,
+    };
+}
+
+export function redactRpcRequestForLog(data: unknown): Record<string, unknown> {
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+        return { invalidRequestType: typeof data };
+    }
+
+    const request = data as { method?: unknown; params?: unknown };
+    return {
+        method: typeof request.method === 'string' ? request.method : undefined,
+        paramsLength: typeof request.params === 'string' ? request.params.length : undefined,
+    };
+}
 
 interface ServerToDaemonEvents {
     update: (data: Update) => void;
@@ -124,7 +158,7 @@ export class ApiMachineClient {
         // Register spawn session handler
         this.rpcHandlerManager.registerHandler('spawn-happy-session', async (params: any) => {
             const { directory, sessionId, machineId, approvedNewDirectoryCreation, agent, environmentVariables, token, resumeClaudeSessionId, parentSessionId, forkedFromMessageId } = params || {};
-            logger.debug(`[API MACHINE] Spawning session with params: ${JSON.stringify(params)}`);
+            logger.debug(`[API MACHINE] Spawning session with params: ${JSON.stringify(redactSpawnSessionParamsForLog(params))}`);
 
             if (!directory) {
                 throw new Error('Directory is required');
@@ -398,7 +432,7 @@ export class ApiMachineClient {
 
         // Single consolidated RPC handler
         this.socket.on('rpc-request', async (data: { method: string, params: string }, callback: (response: string) => void) => {
-            logger.debugLargeJson(`[API MACHINE] Received RPC request:`, data);
+            logger.debugLargeJson(`[API MACHINE] Received RPC request:`, redactRpcRequestForLog(data));
             callback(await this.rpcHandlerManager.handleRequest(data));
         });
 
