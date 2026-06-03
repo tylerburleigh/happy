@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { HAPPY_DEFAULT_ENTRYPOINT } from './happyEntrypoint';
 
 const mocks = vi.hoisted(() => ({
@@ -84,5 +87,47 @@ describe('Claude SDK query env', () => {
 
         const sdkOptions = (mocks.mockSdkQuery.mock.calls as any)[0][0].options;
         expect(sdkOptions.env.CLAUDE_CODE_ENTRYPOINT).toBe('custom-entrypoint');
+    });
+
+    it('inlines settings when sandbox is enabled to avoid SDK settings path conflict', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'happy-claude-settings-'));
+
+        try {
+            const settingsPath = join(dir, 'settings.json');
+            const hookSettings = {
+                hooks: {
+                    SessionStart: [
+                        {
+                            matcher: '*',
+                            hooks: [{ type: 'command', command: 'node hook.js' }],
+                        },
+                    ],
+                },
+            };
+            const sandbox = {
+                enabled: true,
+                failIfUnavailable: true,
+                autoAllowBashIfSandboxed: true,
+            };
+            writeFileSync(settingsPath, JSON.stringify(hookSettings));
+
+            query({
+                prompt: 'hello',
+                options: {
+                    settingsPath,
+                    sandbox: sandbox as any,
+                },
+            });
+
+            const sdkOptions = (mocks.mockSdkQuery.mock.calls as any)[0][0].options;
+            expect(sdkOptions.sandbox).toBeUndefined();
+            expect(typeof sdkOptions.settings).toBe('string');
+            expect(JSON.parse(sdkOptions.settings)).toEqual({
+                ...hookSettings,
+                sandbox,
+            });
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
     });
 });

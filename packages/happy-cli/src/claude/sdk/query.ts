@@ -6,16 +6,37 @@
 import { query as sdkQuery, type Options, type Query } from '@anthropic-ai/claude-agent-sdk'
 import type { QueryOptions, QueryPrompt, SDKMessage } from './types'
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import { readFileSync } from 'node:fs'
 import { ensureLocalProxyBypass } from '../utils/proxyBypass'
 import { resolveHappyEntrypoint } from './happyEntrypoint'
 import { buildSandboxedProcessEnv } from '@/sandbox/env'
 import { buildSandboxRuntimeEnv, ensureSandboxRuntimeDirsSync } from '@/sandbox/temp'
+
+function buildSettingsAndSandboxOptions(opts: QueryOptions | undefined): Pick<Options, 'settings' | 'sandbox'> {
+    if (opts?.settingsPath && opts.sandbox?.enabled) {
+        const settings = JSON.parse(readFileSync(opts.settingsPath, 'utf8')) as Record<string, unknown>
+
+        // The Claude Agent SDK rejects a settings file path plus a separate
+        // sandbox option. Inline JSON keeps Happy's hooks and sandbox config in
+        // the same flag-settings payload while opts.sandbox still drives env
+        // stripping below.
+        return {
+            settings: JSON.stringify({ ...settings, sandbox: opts.sandbox }),
+        }
+    }
+
+    return {
+        settings: opts?.settingsPath,
+        sandbox: opts?.sandbox,
+    }
+}
 
 /**
  * Wraps the official SDK query() with our QueryOptions adapter
  */
 export function query(params: { prompt: QueryPrompt; options?: QueryOptions }): Query {
     const opts = params.options
+    const settingsAndSandboxOptions = buildSettingsAndSandboxOptions(opts)
 
     // Build system prompt
     let systemPrompt: Options['systemPrompt'] = undefined
@@ -42,8 +63,7 @@ export function query(params: { prompt: QueryPrompt; options?: QueryOptions }): 
         disallowedTools: opts?.disallowedTools,
         mcpServers: opts?.mcpServers as Options['mcpServers'],
         systemPrompt,
-        sandbox: opts?.sandbox,
-        settings: opts?.settingsPath,
+        ...settingsAndSandboxOptions,
         strictMcpConfig: opts?.strictMcpConfig,
         sessionId: undefined,
         effort: opts?.effort,
