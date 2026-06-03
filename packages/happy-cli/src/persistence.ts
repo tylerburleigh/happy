@@ -79,6 +79,11 @@ const LEGACY_SANDBOX_BROAD_EXTRA_WRITE_PATHS = [
   '/var/tmp',
   '/private/var/tmp',
 ] as const;
+const LEGACY_SANDBOX_LOCAL_ALLOWED_DOMAINS = [
+  '0.0.0.0',
+  '127.0.0.1',
+  '::1',
+] as const;
 export const DEFAULT_SANDBOX_EXTRA_WRITE_PATHS = [] as const;
 
 export const SandboxConfigSchema = z.object({
@@ -135,6 +140,12 @@ function removeLegacyBroadExtraWritePaths(paths: string[]): string[] {
   return filtered.length === paths.length ? paths : filtered;
 }
 
+function removeLegacyLocalAllowedDomains(domains: string[]): string[] {
+  const localAllowedDomains = new Set<string>(LEGACY_SANDBOX_LOCAL_ALLOWED_DOMAINS);
+  const filtered = domains.filter((domain) => !localAllowedDomains.has(domain.toLowerCase()));
+  return filtered.length === domains.length ? domains : filtered;
+}
+
 export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
   const hasLegacyReadDefaults = LEGACY_SANDBOX_DENY_READ_PATHS.every((path) =>
     config.denyReadPaths.includes(path),
@@ -155,11 +166,13 @@ export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
   const extraWritePaths = hasOnlyLegacyExtraWriteDefaults
     ? [...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]
     : removeLegacyBroadExtraWritePaths(config.extraWritePaths);
+  const allowedDomains = removeLegacyLocalAllowedDomains(config.allowedDomains);
 
   if (
     denyReadPaths === config.denyReadPaths
     && denyWritePaths === config.denyWritePaths
     && extraWritePaths === config.extraWritePaths
+    && allowedDomains === config.allowedDomains
   ) {
     return config;
   }
@@ -169,6 +182,7 @@ export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
     denyReadPaths,
     extraWritePaths,
     denyWritePaths,
+    allowedDomains,
   };
 }
 

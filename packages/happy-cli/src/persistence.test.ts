@@ -152,6 +152,17 @@ describe('normalizeSandboxConfig', () => {
         expect(normalized.extraWritePaths).toEqual(['~/scratch', '~/.cache/tool']);
     });
 
+    it('removes legacy local IP entries from allowed domains', () => {
+        const parsed = SandboxConfigSchema.parse({
+            networkMode: 'custom',
+            allowedDomains: ['0.0.0.0', '127.0.0.1', '::1', 'localhost', 'api.openai.com'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.allowedDomains).toEqual(['localhost', 'api.openai.com']);
+    });
+
     it('leaves intentionally custom deny-read paths unchanged', () => {
         const parsed = SandboxConfigSchema.parse({
             denyReadPaths: ['~/only-this-secret'],
