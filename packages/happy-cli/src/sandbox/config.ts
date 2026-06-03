@@ -43,7 +43,13 @@ function assertNotSymlinkPath(pathValue: string, label: string): void {
     }
 
     if (lstatSync(pathValue).isSymbolicLink()) {
-        throw new Error(`Sandbox ${label} may not be a symbolic link`);
+        let target = '';
+        try {
+            target = ` -> ${realpathSync(pathValue)}`;
+        } catch {
+            // Keep the original path in the error if the symlink cannot be resolved.
+        }
+        throw new Error(`Sandbox ${label} may not be a symbolic link: ${pathValue}${target}`);
     }
 }
 

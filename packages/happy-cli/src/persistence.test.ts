@@ -142,6 +142,16 @@ describe('normalizeSandboxConfig', () => {
         expect(normalized.extraWritePaths).toEqual([...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]);
     });
 
+    it('removes legacy broad temp roots while preserving narrower custom extra write paths', () => {
+        const parsed = SandboxConfigSchema.parse({
+            extraWritePaths: ['/tmp', '/private/tmp', '/var/tmp', '~/scratch', '~/.cache/tool'],
+        });
+
+        const normalized = normalizeSandboxConfig(parsed);
+
+        expect(normalized.extraWritePaths).toEqual(['~/scratch', '~/.cache/tool']);
+    });
+
     it('leaves intentionally custom deny-read paths unchanged', () => {
         const parsed = SandboxConfigSchema.parse({
             denyReadPaths: ['~/only-this-secret'],
@@ -164,11 +174,11 @@ describe('normalizeSandboxConfig', () => {
 
     it('leaves intentionally custom extra write paths unchanged', () => {
         const parsed = SandboxConfigSchema.parse({
-            extraWritePaths: ['/tmp', '~/scratch'],
+            extraWritePaths: ['~/scratch'],
         });
 
         const normalized = normalizeSandboxConfig(parsed);
 
-        expect(normalized.extraWritePaths).toEqual(['/tmp', '~/scratch']);
+        expect(normalized.extraWritePaths).toEqual(['~/scratch']);
     });
 });

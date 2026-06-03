@@ -73,6 +73,12 @@ export const DEFAULT_SANDBOX_DENY_WRITE_PATHS = [
 ] as const;
 
 export const LEGACY_SANDBOX_EXTRA_WRITE_PATHS = ['/tmp'] as const;
+const LEGACY_SANDBOX_BROAD_EXTRA_WRITE_PATHS = [
+  '/tmp',
+  '/private/tmp',
+  '/var/tmp',
+  '/private/var/tmp',
+] as const;
 export const DEFAULT_SANDBOX_EXTRA_WRITE_PATHS = [] as const;
 
 export const SandboxConfigSchema = z.object({
@@ -123,6 +129,12 @@ function hasSamePathSet(paths: string[], defaults: readonly string[]): boolean {
   return paths.length === defaults.length && defaults.every((path) => paths.includes(path));
 }
 
+function removeLegacyBroadExtraWritePaths(paths: string[]): string[] {
+  const broadExtraWritePaths = new Set<string>(LEGACY_SANDBOX_BROAD_EXTRA_WRITE_PATHS);
+  const filtered = paths.filter((path) => !broadExtraWritePaths.has(path));
+  return filtered.length === paths.length ? paths : filtered;
+}
+
 export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
   const hasLegacyReadDefaults = LEGACY_SANDBOX_DENY_READ_PATHS.every((path) =>
     config.denyReadPaths.includes(path),
@@ -142,7 +154,7 @@ export function normalizeSandboxConfig(config: SandboxConfig): SandboxConfig {
     : config.denyWritePaths;
   const extraWritePaths = hasOnlyLegacyExtraWriteDefaults
     ? [...DEFAULT_SANDBOX_EXTRA_WRITE_PATHS]
-    : config.extraWritePaths;
+    : removeLegacyBroadExtraWritePaths(config.extraWritePaths);
 
   if (
     denyReadPaths === config.denyReadPaths
