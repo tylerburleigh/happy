@@ -1,3 +1,29 @@
+> [!IMPORTANT]
+> **This fork is a sandbox hardening preview.**
+>
+> This fork explores what Happy looks like when the local CLI is treated as a
+> security boundary between a trusted user/control plane and an untrusted or
+> mistake-prone coding agent. The goal is to reduce the blast radius of agent
+> tool use while preserving Happy's mobile-first approval workflow.
+>
+> **Hardening added in this fork:**
+>
+> - OS-level sandbox launch paths for Claude, Codex, Gemini, and ACP-backed agents, with fail-closed startup unless fallback is explicitly enabled.
+> - Isolated per-session agent state, managed sandbox home/temp directories, and filtered agent environments so globally exported secrets are not automatically inherited.
+> - Per-project `.happy/sandbox.json` policy overlays, stricter path validation, default write scoping to the current Git worktree when available, and explicit denial of sensitive Happy state.
+> - Semantic approval checks for high-risk commands and edits, including Git history/ref mutation, GitHub CLI token/destructive operations, package publishing, credential-adjacent files, and sandbox policy files.
+> - Daemon/control-plane hardening, including authenticated local control endpoints, safer spawn validation, redacted logs/API payloads, private file permissions, and sandbox status metadata surfaced to the app.
+>
+> **Threat model:** this is not a claim of containment against a fully hostile
+> local process or a compromised host. The intended threat model is an agent
+> making mistakes inside a legitimate session.
+>
+> **Next planned layer:** a Happy-managed egress proxy and credential broker so
+> supported providers can be used without exposing raw credentials inside agent
+> environments.
+
+---
+
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="/.github/logotype-dark.png">
@@ -13,27 +39,6 @@
 <h4 align="center">
 Use Claude Code or Codex from anywhere with end-to-end encryption.
 </h4>
-
-> **Fork focus: sandbox hardening preview**
->
-> This fork explores what Happy looks like when the local CLI is treated as a
-> security boundary between a trusted user/control plane and an untrusted or
-> mistake-prone coding agent. The goal is to reduce the blast radius of agent
-> tool use while preserving Happy's mobile-first approval workflow.
->
-> The hardening work currently adds:
->
-> - OS-level sandbox launch paths for Claude, Codex, Gemini, and ACP-backed agents, with fail-closed startup unless fallback is explicitly enabled.
-> - Isolated per-session agent state, managed sandbox home/temp directories, and filtered agent environments so globally exported secrets are not automatically inherited.
-> - Per-project `.happy/sandbox.json` policy overlays, stricter path validation, default write scoping to the current Git worktree when available, and explicit denial of sensitive Happy state.
-> - Semantic approval checks for high-risk commands and edits, including Git history/ref mutation, GitHub CLI token/destructive operations, package publishing, credential-adjacent files, and sandbox policy files.
-> - Daemon/control-plane hardening, including authenticated local control endpoints, safer spawn validation, redacted logs/API payloads, private file permissions, and sandbox status metadata surfaced to the app.
->
-> This is not a claim of containment against a fully hostile local process or a
-> compromised host. The intended threat model is an agent making mistakes inside
-> a legitimate session. The next planned layer is a Happy-managed egress proxy
-> and credential broker so supported providers can be used without exposing raw
-> credentials inside agent environments.
 
 <div align="center">
   
